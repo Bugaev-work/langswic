@@ -5,6 +5,14 @@ $framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $wpf = Join-Path $framework 'WPF'
 $out = Join-Path $PSScriptRoot 'dist'
 New-Item -ItemType Directory -Path $out -Force | Out-Null
+$zig = Join-Path $PSScriptRoot '.tools\compiler\zig-x86_64-windows-0.14.1\zig.exe'
+if (-not (Test-Path -LiteralPath $zig)) { throw 'Run native\bootstrap.ps1 once to download and verify Zig 0.14.1. Subsequent builds work offline.' }
+$nativeDll = Join-Path $out 'NativeLayout64.dll'
+$env:ZIG_GLOBAL_CACHE_DIR = Join-Path $PSScriptRoot '.tools\cache'
+$env:ZIG_LOCAL_CACHE_DIR = Join-Path $PSScriptRoot '.tools\local-cache'
+& $zig cc -target x86_64-windows-gnu -shared -nostdlib -Os -s '-Wl,-e,DllMain' -o $nativeDll (Join-Path $PSScriptRoot 'native\layout.c') -luser32 -lkernel32
+if ($LASTEXITCODE -ne 0) { throw 'Native input-language module build failed.' }
+$nativeResource = '/resource:' + $nativeDll + ',FastSwitcher.NativeLayout64'
 $assets = Join-Path $PSScriptRoot 'assets'
 New-Item -ItemType Directory -Path $assets -Force | Out-Null
 $iconPath = Join-Path $assets 'FastSwitcher.ico'
@@ -38,9 +46,9 @@ $testReferenceArgs = @($referenceArgs + @(
     ForEach-Object { '/reference:' + (Join-Path $wpf $_) }
 ) + @(('/reference:' + (Join-Path $framework 'System.Xaml.dll')), ('/reference:' + (Join-Path $wpf 'UIAutomationProvider.dll'))))
 $sources = @(Get-ChildItem $PSScriptRoot -Filter '*.cs' | ForEach-Object FullName)
-& $csc /nologo /utf8output /platform:x64 /target:winexe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'FastSwitcher.exe')) $referenceArgs $sources
+& $csc /nologo /utf8output /platform:x64 /target:winexe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'FastSwitcher.exe')) $nativeResource $referenceArgs $sources
 if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }
-& $csc /nologo /utf8output /define:INPUT_TEST /platform:x64 /target:exe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'FastSwitcher.Tests.exe')) $testReferenceArgs $sources
+& $csc /nologo /utf8output /define:INPUT_TEST /platform:x64 /target:exe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'FastSwitcher.Tests.exe')) $nativeResource $testReferenceArgs $sources
 if ($LASTEXITCODE -ne 0) { throw 'Test build failed.' }
 if ($CompileOnly) { Write-Output 'Compilation complete; tests and installer were not run.'; exit 0 }
 & (Join-Path $out 'FastSwitcher.Tests.exe') --self-test

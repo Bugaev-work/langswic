@@ -77,16 +77,28 @@ internal static class InputIntegrationTests {
                 if(!File.Exists(path+".ready"))throw new InvalidOperationException("Test target did not start");
                 IntPtr target=new IntPtr(long.Parse(File.ReadAllText(path+".ready")));
                 English(target);await Focus(target);await Task.Delay(120);
+                Keys(0x48,0x45,0x4C,0x4C,0x4F,Native.VK_SPACE);
+                if(await WaitFor(path,"hello "))Console.WriteLine("OK initial English word stays English");
+                else{Console.WriteLine("FAIL initial English input: ["+Read(path)+"]");failed++;}
                 Keys(0x47,0x48,0x42,0x44,0x54,0x4E,Native.VK_SPACE);
-                if(await WaitFor(path,"привет "))Console.WriteLine("OK automatic layout in editable field");
+                if(await WaitFor(path,"hello привет "))Console.WriteLine("OK automatic RU word after English text");
                 else{Console.WriteLine("FAIL automatic layout: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
                 await Task.Delay(180);
-                if(TargetLanguage(target,0x0419))Console.WriteLine("OK ignored child language request falls back to top window and persists");
+                if(TargetLanguage(target,0x0419))Console.WriteLine("OK RU persists when both child and top window ignore ordinary layout requests");
                 else{Console.WriteLine("FAIL layout persistence after RU correction: "+LayoutInfo(target)+" "+host.InputDiagnostic+" requests="+Read(path+".layout-msgs"));failed++;}
+                Keys(0x51,0x5A,0x58);
+                if(await WaitFor(path,"hello привет йяч"))Console.WriteLine("OK next raw keys use RU without word conversion");
+                else{Console.WriteLine("FAIL subsequent RU typing: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                English(target);await Task.Delay(220);Keys(0x51);
+                if(await WaitFor(path,"hello привет йячq") && TargetLanguage(target,0x0409))Console.WriteLine("OK explicit later language change is respected");
+                else{Console.WriteLine("FAIL explicit layout change: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
                 Russian(target);await Focus(target);SelectAll();await Task.Delay(150);
                 Keys(0x48,0x45,0x4C,0x4C,0x4F,Native.VK_SPACE);
                 if(await WaitFor(path,"hello "))Console.WriteLine("OK reverse automatic layout in editable field");
                 else{Console.WriteLine("FAIL reverse automatic layout: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Keys(0x51,0x5A,0x58);
+                if(await WaitFor(path,"hello qzx") && TargetLanguage(target,0x0409))Console.WriteLine("OK reverse conversion retains EN for next raw keys");
+                else{Console.WriteLine("FAIL subsequent EN typing: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
                 Russian(target);await Focus(target);SelectAll();await Task.Delay(150);
                 Keys(0x47,0x4F,0x56,0x45,0x52);
                 if(await WaitFor(path,"gover"))Console.WriteLine("OK government corrected before word end");
@@ -99,6 +111,13 @@ internal static class InputIntegrationTests {
                 await Focus(target);DoubleShift();
                 if(await WaitFor(path,"пщмуктьуте"))Console.WriteLine("OK early conversion undo after word completion");
                 else{Console.WriteLine("FAIL early conversion undo: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                host.ForgetRuleForTest("пщмуктьуте");
+                Russian(target);await Focus(target);SelectAll();await Task.Delay(150);
+                Native.PostMessage(target,0x800B,IntPtr.Zero,IntPtr.Zero);await Task.Delay(100);
+                Keys(0x47,0x4F,0x56,0x45,0x52);
+                if(await WaitFor(path,"gover") && TargetLanguage(target,0x0409))Console.WriteLine("OK prefix correction waits for delayed target character processing");
+                else{Console.WriteLine("FAIL delayed prefix: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Native.PostMessage(target,0x800C,IntPtr.Zero,IntPtr.Zero);await Task.Delay(100);
                 if(layoutOnly)return;
                 Native.PostMessage(target,0x8004,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"привет how are");
                 await Focus(target);DoubleShift();
@@ -271,14 +290,16 @@ internal static class InputIntegrationTests {
         public CustomEditor CustomBox;
         protected override void WndProc(ref Message m){
             if(m.Msg==Native.WM_INPUTLANGCHANGEREQUEST){
-                // This fixture accepts language changes at its top-level window,
-                // while its native child deliberately ignores the same request.
-                long requested=m.LParam.ToInt64();Native.ActivateKeyboardLayout(m.LParam,0);m.Result=IntPtr.Zero;
+                // Both window and child decline normal requests. The fixture
+                // never cooperates with the switcher's native language command.
+                long requested=m.LParam.ToInt64();m.Result=IntPtr.Zero;
                 Write(LayoutReport,"request="+requested.ToString("X")+" after="+Native.GetKeyboardLayout(0).ToInt64().ToString("X"));return;
             }
             if(m.Msg==0x8001){var h=Native.LoadKeyboardLayout("00000409",1);if(h!=IntPtr.Zero)Native.ActivateKeyboardLayout(h,0);}
             if(m.Msg==0x8002){var h=Native.LoadKeyboardLayout("00000419",1);if(h!=IntPtr.Zero)Native.ActivateKeyboardLayout(h,0);}
             if(m.Msg==0x8003){Activate();if(Box!=null)Box.Focus();}
+            if(m.Msg==0x800B){((IgnoringLayoutTextBox)Box).DelayCharacters=true;}
+            if(m.Msg==0x800C){((IgnoringLayoutTextBox)Box).DelayCharacters=false;}
             if(m.Msg==0x8004 && Box!=null){Box.Text="привет how are";Box.SelectionStart=Box.TextLength;Box.SelectionLength=0;}
             if(m.Msg==0x8005 && Box!=null){Box.Text="123";Box.SelectionStart=Box.TextLength;Box.SelectionLength=0;}
             if(m.Msg==0x8006 && Box!=null){Box.Text="abc";Box.SelectionStart=Box.TextLength;Box.SelectionLength=0;}
@@ -359,7 +380,12 @@ internal static class InputIntegrationTests {
         public void ScrollIntoView(bool align){inner.ScrollIntoView(align);}
     }
     sealed class IgnoringLayoutTextBox : TextBox {
-        protected override void WndProc(ref Message message){if(message.Msg==Native.WM_INPUTLANGCHANGEREQUEST){message.Result=IntPtr.Zero;return;}base.WndProc(ref message);}
+        public bool DelayCharacters;
+        protected override void WndProc(ref Message message){
+            if(message.Msg==Native.WM_INPUTLANGCHANGEREQUEST){message.Result=IntPtr.Zero;return;}
+            if(message.Msg==0x102 && DelayCharacters)System.Threading.Thread.Sleep(50);
+            base.WndProc(ref message);
+        }
     }
     public static int Target(string path){
         Native.LoadKeyboardLayout("00000409",1);

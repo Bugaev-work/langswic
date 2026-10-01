@@ -43,7 +43,7 @@ static class Program {
             if(!string.Equals(Application.ExecutablePath,target,StringComparison.OrdinalIgnoreCase))File.Copy(Application.ExecutablePath,target,true);
             Shortcut(StartMenu(),target);
             using(var key=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FastSwitcher")){
-                key.SetValue("DisplayName","Fast Switcher");key.SetValue("DisplayVersion","1.4.1");key.SetValue("Publisher","Личный проект");
+                key.SetValue("DisplayName","Fast Switcher");key.SetValue("DisplayVersion","1.4.2");key.SetValue("Publisher","Личный проект");
                 key.SetValue("InstallLocation",dir);key.SetValue("DisplayIcon",target);
                 key.SetValue("UninstallString","\""+target+"\" --uninstall");key.SetValue("NoModify",1,RegistryValueKind.DWord);
             }
@@ -59,7 +59,7 @@ static class Program {
     }
     static void StopInstalledCopy(string executable){
         foreach(var p in Process.GetProcessesByName("FastSwitcher"))try{
-            if(string.Equals(p.MainModule.FileName,executable,StringComparison.OrdinalIgnoreCase)){p.Kill();p.WaitForExit(3000);}
+            if(p.Id!=Process.GetCurrentProcess().Id && string.Equals(p.MainModule.FileName,executable,StringComparison.OrdinalIgnoreCase)){p.Kill();p.WaitForExit(3000);}
         }finally{p.Dispose();}
     }
     static bool TestOnlySettings(string path){
@@ -97,10 +97,19 @@ static class Program {
             using(var run=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run",true))if(run!=null)run.DeleteValue("FastSwitcher",false);
             Registry.CurrentUser.DeleteSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FastSwitcher",false);
             if(File.Exists(StartMenu()))File.Delete(StartMenu());
-            string dir=InstallDir(),exe=Path.Combine(dir,"FastSwitcher.exe");
-            string script=Path.Combine(Path.GetTempPath(),"FastSwitcher-uninstall-"+Guid.NewGuid().ToString("N")+".cmd");
-            File.WriteAllText(script,"@echo off\r\nping 127.0.0.1 -n 3 >nul\r\ndel /q \""+exe+"\"\r\nrmdir \""+dir+"\"\r\ndel /q \"%~f0\"\r\n");
-            Process.Start(new ProcessStartInfo("cmd.exe","/c \""+script+"\""){CreateNoWindow=true,UseShellExecute=false,WindowStyle=ProcessWindowStyle.Hidden});
+            string dir=Path.GetFullPath(InstallDir()),exe=Path.Combine(dir,"FastSwitcher.exe");StopInstalledCopy(exe);
+            string script=Path.Combine(Path.GetTempPath(),"FastSwitcher-uninstall-"+Guid.NewGuid().ToString("N")+".ps1");
+            // Delete only this app's exact files, in one shell with literal paths.
+            string cleanup="$fastSwitcherDir = '"+dir.Replace("'","''")+"'\r\n"+
+                "for ($attempt = 0; $attempt -lt 30; $attempt++) {\r\nStart-Sleep -Seconds 1\r\n"+
+                "if (!(Test-Path -LiteralPath $fastSwitcherDir)) { break }\r\n"+
+                "$fastSwitcherFiles = @(Get-ChildItem -LiteralPath $fastSwitcherDir -File | Where-Object { $_.Name -match '^(FastSwitcher\\.exe|FastSwitcher\\.Layout\\.[A-F0-9]{64}\\.dll)$' })\r\n"+
+                "foreach ($fastSwitcherFile in $fastSwitcherFiles) { if ([IO.Path]::GetFullPath($fastSwitcherFile.DirectoryName) -eq $fastSwitcherDir) { Remove-Item -LiteralPath $fastSwitcherFile.FullName -Force -ErrorAction SilentlyContinue } }\r\n"+
+                "if (@(Get-ChildItem -LiteralPath $fastSwitcherDir -Force).Count -eq 0) { Remove-Item -LiteralPath $fastSwitcherDir -ErrorAction SilentlyContinue; break }\r\n"+
+                "}\r\nRemove-Item -LiteralPath $PSCommandPath -Force\r\n";
+            File.WriteAllText(script,cleanup,System.Text.Encoding.UTF8);
+            string powershell=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");
+            Process.Start(new ProcessStartInfo(powershell,"-NoProfile -ExecutionPolicy Bypass -File \""+script+"\""){CreateNoWindow=true,UseShellExecute=false,WindowStyle=ProcessWindowStyle.Hidden});
             if(!silent)MessageBox.Show("Fast Switcher удалено. Личные словари и настройки оставлены в %LOCALAPPDATA%\\FastSwitcher.","Удаление завершено");
         }catch(Exception e){if(silent)throw;MessageBox.Show("Не удалось удалить программу: "+e.Message,"Fast Switcher",MessageBoxButtons.OK,MessageBoxIcon.Error);}
     }

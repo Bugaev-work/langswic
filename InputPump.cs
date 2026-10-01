@@ -11,10 +11,11 @@ internal sealed class InputPump : IDisposable {
     readonly Action<KeyEvent> deliver;readonly Action mouse;readonly Func<bool> capturePause;
     Thread thread;uint threadId;IntPtr keyboardHook,mouseHook;
     Native.HookProc keyboardCallback,mouseCallback;
-    long generation;readonly ManualResetEvent ready=new ManualResetEvent(false);
+    long generation,layoutIntentGeneration;readonly ManualResetEvent ready=new ManualResetEvent(false);
     bool control,alt;
     public bool Active {get{return keyboardHook!=IntPtr.Zero;}}
     public long Generation {get{return Interlocked.Read(ref generation);}}
+    public long LayoutIntentGeneration {get{return Interlocked.Read(ref layoutIntentGeneration);}}
     public void Invalidate(){Interlocked.Increment(ref generation);}
     public InputPump(Action<KeyEvent> deliver,Action mouse,Func<bool> capturePause){this.deliver=deliver;this.mouse=mouse;this.capturePause=capturePause;}
     public void Start(){
@@ -48,6 +49,12 @@ internal sealed class InputPump : IDisposable {
                 bool modifier=key.vk==Native.VK_SHIFT || key.vk==0xA0 || key.vk==0xA1 || key.vk==Native.VK_CONTROL || key.vk==0xA2 || key.vk==0xA3 || key.vk==Native.VK_MENU || key.vk==0xA4 || key.vk==0xA5;
                 bool command=key.vk==Native.VK_PAUSE || (control && alt && key.vk>=0x70 && key.vk<=0x7B);
                 if(down && !modifier && !command)Invalidate();
+                // Ordinary letters must not cancel a pending layout change.
+                // Explicit layout shortcuts, navigation and focus changes do.
+                if(down && (control || alt || key.vk==0x5B || key.vk==0x5C ||
+                    key.vk==Native.VK_LEFT || key.vk==Native.VK_RIGHT || key.vk==Native.VK_UP || key.vk==Native.VK_DOWN ||
+                    key.vk==Native.VK_TAB || key.vk==Native.VK_RETURN || key.vk==0x24 || key.vk==0x23))
+                    Interlocked.Increment(ref layoutIntentGeneration);
                 IntPtr window=Native.GetForegroundWindow();uint pid;uint id=Native.GetWindowThreadProcessId(window,out pid);
                 var info=new Native.GUITHREADINFO{cbSize=Marshal.SizeOf(typeof(Native.GUITHREADINFO))};
                 if(Native.GetGUIThreadInfo(id,ref info)){
@@ -60,7 +67,7 @@ internal sealed class InputPump : IDisposable {
         return Native.CallNextHookEx(keyboardHook,code,wp,lp);
     }
     IntPtr OnMouse(int code,IntPtr wp,IntPtr lp){
-        if(code>=0 && (wp==(IntPtr)0x201 || wp==(IntPtr)0x204 || wp==(IntPtr)0x207)){Invalidate();mouse();}
+        if(code>=0 && (wp==(IntPtr)0x201 || wp==(IntPtr)0x204 || wp==(IntPtr)0x207)){Interlocked.Increment(ref layoutIntentGeneration);Invalidate();mouse();}
         return Native.CallNextHookEx(mouseHook,code,wp,lp);
     }
     public void Stop(){

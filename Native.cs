@@ -45,7 +45,6 @@ internal static class Native {
     [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hwnd,int id,uint modifiers,uint vk);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd,int id);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern bool PostMessage(IntPtr hwnd,uint msg,IntPtr wp,IntPtr lp);
-    [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd,uint msg,IntPtr wp,IntPtr lp,uint flags,uint milliseconds,out UIntPtr result);
     public static bool RequestLayout(IntPtr focus,IntPtr window,IntPtr layout){
         if(focus==IntPtr.Zero || window==IntPtr.Zero || GetForegroundWindow()!=window)return false;
         uint pid;uint thread=GetWindowThreadProcessId(focus,out pid);
@@ -54,9 +53,9 @@ internal static class Native {
         // Chromium child HWNDs can ignore the request; also address the top-level HWND.
         // Windows defines this as a posted request. Sent requests can be ignored
         // by frameworks that synchronize their input-language state on the queue.
-        PostMessage(focus,WM_INPUTLANGCHANGEREQUEST,(IntPtr)1,layout);
+        PostMessage(focus,WM_INPUTLANGCHANGEREQUEST,IntPtr.Zero,layout);
         if(window!=focus && GetForegroundWindow()==window)
-            PostMessage(window,WM_INPUTLANGCHANGEREQUEST,(IntPtr)1,layout);
+            PostMessage(window,WM_INPUTLANGCHANGEREQUEST,IntPtr.Zero,layout);
         return GetKeyboardLayout(thread)==layout;
     }
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd,StringBuilder name,int max);

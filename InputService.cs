@@ -20,6 +20,7 @@ public sealed class InputService : IDisposable {
     }
 #endif
     readonly Form owner; readonly IntPtr ownerHandle; readonly SettingsStore store; LanguageEngine engine;
+    readonly LayoutService layoutService=new LayoutService();
     readonly BlockingCollection<Action> work=new BlockingCollection<Action>(256);
     readonly List<WorkTimer> timers=new List<WorkTimer>();
     readonly InputPump pump; Thread worker; volatile bool stopped; int lostEvents,notifyPending;
@@ -33,6 +34,7 @@ public sealed class InputService : IDisposable {
     public int SkippedProtected {get;private set;}
     public int FailedInjection {get;private set;}
     public int FailedLayoutChanges {get;private set;}
+    public string LayoutDiagnostic {get{return "Layout Win32 error="+layoutService.LastError;}}
     public int VerifiedValueReplacements {get;private set;}
     public string ActiveProcess {get{return process;}}
     public string LastReason {get;private set;}
@@ -54,7 +56,7 @@ public sealed class InputService : IDisposable {
             if(stopped)break;
             try{if(Interlocked.Exchange(ref lostEvents,0)!=0)Reset();action();}
             catch(Exception e){Reset();LastReason="Операция пропущена: "+e.GetType().Name;Notify();}
-        }}finally{engine.Dispose();}
+        }}finally{engine.Dispose();layoutService.Dispose();}
     }
     WorkTimer CreateTimer(int interval){
         var timer=new WorkTimer(Post,t=>{lock(timers)timers.Remove(t);},interval);
@@ -237,11 +239,15 @@ public sealed class InputService : IDisposable {
     }
     void SchedulePrefixCorrection(IntPtr window,IntPtr focus,IntPtr layout){
         int token=++prefixToken;
-        var timer=CreateTimer(25);timer.Tick+=delegate{
-            timer.Stop();timer.Dispose();
-            if(token!=prefixToken || earlyWord || word.Length<5 || word.Length>32 || pump.Generation!=sequence)return;
-            IntPtr w,f,l;if(!SafeFocus(out w,out f,out l) || w!=window || f!=focus)return;
-            string actual,ending;if(!ReadWordAtCaret(f,out actual,out ending) || ending.Length!=0 || actual!=word)return;
+        var timer=CreateTimer(25);int attempts=0;Action finish=()=>{timer.Stop();timer.Dispose();};timer.Tick+=delegate{
+            if(token!=prefixToken || earlyWord || word.Length<5 || word.Length>32 || pump.Generation!=sequence){finish();return;}
+            IntPtr w,f,l;if(!SafeFocus(out w,out f,out l) || w!=window || f!=focus){finish();return;}
+            string actual,ending;if(!ReadWordAtCaret(f,out actual,out ending) || ending.Length!=0 || actual!=word){
+                // Hook events precede the target's WM_CHAR. Allow its text/caret
+                // to catch up without losing an otherwise valid prefix check.
+                if(++attempts>=10)finish();return;
+            }
+            finish();
             string preceding=context.Substring(0,Math.Max(0,context.Length-word.Length));
             engine.AddUserWords(store.Current);
             var decision=engine.DecidePrefix(word,preceding,store.Current,policy);
@@ -297,22 +303,28 @@ public sealed class InputService : IDisposable {
         int count=Native.GetKeyboardLayoutList(0,null);if(count<=0)return;
         var layouts=new IntPtr[count];Native.GetKeyboardLayoutList(count,layouts);
         foreach(var item in layouts)if(((long)item&0xffff)==target){
-            IntPtr focus=currentFocus;long generation=pump.Generation;int token=++layoutToken;
+            IntPtr focus=currentFocus;long generation=pump.Generation;long intent=pump.LayoutIntentGeneration;int token=++layoutToken;
             if(!CanChange(generation,window,focus))return;
+            uint pid;uint thread=Native.GetWindowThreadProcessId(focus,out pid);
+            IntPtr source=Native.GetKeyboardLayout(thread);
+            if(source==item)return;
+            if(layoutService.Activate(focus,window,item))return;
             Native.RequestLayout(focus,window,item);
+            if(Native.GetKeyboardLayout(thread)==item)return;
             // Verify again after the target processes queued input and focus messages.
-            // Never fight a later physical keystroke or a user-initiated layout change.
+            // Continue across ordinary typing, stop on explicit user intent or focus changes.
             var timer=CreateTimer(40);int attempts=0;
             timer.Tick+=delegate{
-                if(token!=layoutToken || !CanChange(generation,window,focus)){
+                if(token!=layoutToken || intent!=pump.LayoutIntentGeneration || !CanChange(pump.Generation,window,focus)){
                     timer.Stop();timer.Dispose();return;
                 }
-                uint pid;uint thread=Native.GetWindowThreadProcessId(focus,out pid);
                 if(Native.GetKeyboardLayout(thread)==item){timer.Stop();timer.Dispose();return;}
+                if(Native.GetKeyboardLayout(thread)!=source){timer.Stop();timer.Dispose();return;}
                 if(++attempts>=4){
                     timer.Stop();timer.Dispose();FailedLayoutChanges++;
                     LastReason="Приложение не подтвердило смену раскладки";Notify();return;
                 }
+                if(layoutService.Activate(focus,window,item)){timer.Stop();timer.Dispose();return;}
                 Native.RequestLayout(focus,window,item);
             };timer.Start();return;
         }
