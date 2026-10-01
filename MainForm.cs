@@ -218,7 +218,7 @@ public sealed class MainForm : Form {
         tray.Text=store.Current.Enabled?"Fast Switcher · автоматика включена":"Fast Switcher · автоматика выключена";
         if(subtitle!=null&&!subtitle.IsDisposed){
             if(page==0)subtitle.Text=store.Current.Enabled?"● Автоматика включена":"○ Автоматика выключена";
-            if(page==5)subtitle.Text="Перехват: "+(input.HookActive?"активен":"нет")+"\r\n"+engine.DictionaryStatus+"\r\nАктивное приложение: "+input.ActiveProcess+"\r\nИсправлений за сеанс: "+input.Corrections+"\r\nЗащищённых или неподдерживаемых полей: "+input.SkippedProtected+"\r\nОшибок ввода: "+input.FailedInjection+"\r\nПоследнее решение: "+input.LastReason;
+            if(page==5)subtitle.Text="Перехват: "+(input.HookActive?"активен":"нет")+"\r\n"+engine.DictionaryStatus+"\r\nАктивное приложение: "+input.ActiveProcess+"\r\nИсправлений за сеанс: "+input.Corrections+"\r\nЗащищённых или неподдерживаемых полей: "+input.SkippedProtected+"\r\nОшибок ввода: "+input.FailedInjection+"\r\nНеподтверждённых смен раскладки: "+input.FailedLayoutChanges+"\r\nПоследнее решение: "+input.LastReason;
         }
     }
     void UnregisterHotkeys(){for(int i=1;i<=4;i++)Native.UnregisterHotKey(Handle,i);}

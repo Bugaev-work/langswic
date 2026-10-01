@@ -24,7 +24,7 @@ public sealed class InputService : IDisposable {
     readonly List<WorkTimer> timers=new List<WorkTimer>();
     readonly InputPump pump; Thread worker; volatile bool stopped; int lostEvents,notifyPending;
     string word="",context="",lastWord="",lastDelimiter="";
-    bool earlyWord; string earlyOriginal=""; int earlySourceLanguage,prefixToken;
+    bool earlyWord; string earlyOriginal=""; int earlySourceLanguage,prefixToken,layoutToken;
     IntPtr currentWindow=IntPtr.Zero,currentFocus=IntPtr.Zero;
     string process=""; AppRule policy; int[] currentElementId;
     long sequence; uint lastShiftTime; bool shiftOnly,shiftPressed,controlPressed,altPressed,pendingManual; int shiftToken;
@@ -32,6 +32,7 @@ public sealed class InputService : IDisposable {
     public int Corrections {get;private set;}
     public int SkippedProtected {get;private set;}
     public int FailedInjection {get;private set;}
+    public int FailedLayoutChanges {get;private set;}
     public int VerifiedValueReplacements {get;private set;}
     public string ActiveProcess {get{return process;}}
     public string LastReason {get;private set;}
@@ -78,7 +79,7 @@ public sealed class InputService : IDisposable {
         try{owner.BeginInvoke((Action)delegate{if(stopped)return;store.Current.Learned[source.ToLowerInvariant()]=target.ToLowerInvariant();store.Save();});}
         catch(InvalidOperationException){}
     }
-    void Reset(){prefixToken++;shiftToken++;shiftOnly=false;pendingManual=false;word="";context="";lastWord="";lastDelimiter="";lastAction=null;earlyWord=false;earlyOriginal="";earlySourceLanguage=0;}
+    void Reset(){prefixToken++;shiftToken++;layoutToken++;shiftOnly=false;pendingManual=false;word="";context="";lastWord="";lastDelimiter="";lastAction=null;earlyWord=false;earlyOriginal="";earlySourceLanguage=0;}
     void AfterModifiers(Action action){var t=CreateTimer(25);int ticks=0;long generation=pump.Generation;IntPtr window=Native.GetForegroundWindow();t.Tick+=delegate{ticks++;
         if(stopped || pump.Generation!=generation || Native.GetForegroundWindow()!=window){t.Stop();t.Dispose();return;}
         bool released=!Native.AsyncDown(Native.VK_SHIFT)&&!Native.AsyncDown(Native.VK_CONTROL)&&!Native.AsyncDown(Native.VK_MENU);
@@ -211,6 +212,7 @@ public sealed class InputService : IDisposable {
             string target=engine.Convert(earlyOriginal);
             if(word!=target && ReplaceVerifiedTail(f,word,target)){
                 word=target;if(lastAction!=null)lastAction.After=target;
+                SetTextLayout(w,target);
             }
         };timer.Start();
     }
@@ -231,7 +233,7 @@ public sealed class InputService : IDisposable {
         prefixToken++;earlyOriginal=original;earlyWord=true;earlySourceLanguage=(int)((long)layout&0xffff);word=decision.Text;
         context=preceding+word;if(context.Length>128)context=context.Substring(context.Length-128);
         lastAction=new ActionInfo{Window=window,Focus=focus,ElementId=FocusId(),Sequence=sequence,Before=original,After=word,Delimiter="",Kind=ChangeKind.Layout,At=DateTime.UtcNow};
-        SwitchLayout(window,layout);Corrections++;Sound(ChangeKind.Layout);LastReason=decision.Reason;Notify();
+        SetTextLayout(window,decision.Text);Corrections++;Sound(ChangeKind.Layout);LastReason=decision.Reason;Notify();
     }
     void SchedulePrefixCorrection(IntPtr window,IntPtr focus,IntPtr layout){
         int token=++prefixToken;
@@ -275,7 +277,7 @@ public sealed class InputService : IDisposable {
             if(pump.Generation!=atSequence || sequence!=atSequence || !SafeFocus(out w,out f,out l) || w!=window || f!=focus)return;
             if(decision.Kind==ChangeKind.None){Notify();return;}
             if(decision.Kind==ChangeKind.Layout && !HasOppositeLayout(l))return;
-            if(!ReplaceVerifiedTail(f,original+delimiter,decision.Text+delimiter,delegate{if(decision.Kind==ChangeKind.Layout)SwitchLayout(w,l);} ))return;
+            if(!ReplaceVerifiedTail(f,original+delimiter,decision.Text+delimiter,delegate{if(decision.Kind==ChangeKind.Layout)SetTextLayout(w,decision.Text);} ))return;
             lastWord=decision.Text;lastDelimiter=delimiter;
             context=preceding+decision.Text+delimiter;if(context.Length>128)context=context.Substring(context.Length-128);
             lastAction=new ActionInfo{Window=w,Focus=f,ElementId=FocusId(),Sequence=sequence,Before=original,After=decision.Text,Delimiter=delimiter,Kind=decision.Kind,At=DateTime.UtcNow};
@@ -284,9 +286,36 @@ public sealed class InputService : IDisposable {
     }
     void SwitchLayout(IntPtr window,IntPtr current){
         uint target=((long)current&0xffff)==0x0409?0x0419u:0x0409u;
+        SetLanguage(window,target);
+    }
+    void SetTextLayout(IntPtr window,string text){
+        bool ru=text.Any(c=>(c>='а'&&c<='я')||(c>='А'&&c<='Я')||c=='ё'||c=='Ё');
+        bool en=text.Any(c=>(c>='a'&&c<='z')||(c>='A'&&c<='Z'));
+        if(ru!=en)SetLanguage(window,ru?0x0419u:0x0409u);
+    }
+    void SetLanguage(IntPtr window,uint target){
         int count=Native.GetKeyboardLayoutList(0,null);if(count<=0)return;
         var layouts=new IntPtr[count];Native.GetKeyboardLayoutList(count,layouts);
-        foreach(var item in layouts)if(((long)item&0xffff)==target){Native.RequestLayout(currentFocus,window,item);return;}
+        foreach(var item in layouts)if(((long)item&0xffff)==target){
+            IntPtr focus=currentFocus;long generation=pump.Generation;int token=++layoutToken;
+            if(!CanChange(generation,window,focus))return;
+            Native.RequestLayout(focus,window,item);
+            // Verify again after the target processes queued input and focus messages.
+            // Never fight a later physical keystroke or a user-initiated layout change.
+            var timer=CreateTimer(40);int attempts=0;
+            timer.Tick+=delegate{
+                if(token!=layoutToken || !CanChange(generation,window,focus)){
+                    timer.Stop();timer.Dispose();return;
+                }
+                uint pid;uint thread=Native.GetWindowThreadProcessId(focus,out pid);
+                if(Native.GetKeyboardLayout(thread)==item){timer.Stop();timer.Dispose();return;}
+                if(++attempts>=4){
+                    timer.Stop();timer.Dispose();FailedLayoutChanges++;
+                    LastReason="Приложение не подтвердило смену раскладки";Notify();return;
+                }
+                Native.RequestLayout(focus,window,item);
+            };timer.Start();return;
+        }
     }
     void Sound(ChangeKind kind){
         bool layout=kind==ChangeKind.Layout; if(layout?!store.Current.SoundLayout:!store.Current.SoundTypos)return;
@@ -308,11 +337,11 @@ public sealed class InputService : IDisposable {
         }
         string target=engine.Convert(source);
         if(target==source)return;
-        if(ReplaceVerifiedTail(f,source+delimiter,target+delimiter)){
+        if(ReplaceVerifiedTail(f,source+delimiter,target+delimiter,()=>SetTextLayout(w,target))){
             word=delimiter.Length==0?target:"";lastWord=target;
             lastAction=new ActionInfo{Window=w,Focus=f,ElementId=FocusId(),Sequence=sequence,Before=source,After=target,Delimiter=delimiter,Kind=ChangeKind.Layout,At=DateTime.UtcNow};
             Remember(source,target);
-            SwitchLayout(w,l);Corrections++;Sound(ChangeKind.Layout);LastReason="Ручная конвертация слова";Notify();
+            Corrections++;Sound(ChangeKind.Layout);LastReason="Ручная конвертация слова";Notify();
         }
     }
     static bool SplitCaretWord(string before,out string source,out string delimiter){
@@ -371,6 +400,7 @@ public sealed class InputService : IDisposable {
                 string target=engine.Convert(source);if(target==source)return false;
                 if(!Native.ReplaceEditSelection(f,source,target,true)){LastReason="Выделение изменилось — замена отменена";Notify();return false;}
                 int[] id=FocusId();Reset();lastAction=new ActionInfo{Window=w,Focus=f,ElementId=id,Sequence=sequence,Before=source,After=target,Delimiter="",Kind=ChangeKind.Layout,At=DateTime.UtcNow,Selection=true,NativeSelection=true};
+                SetTextLayout(w,target);
                 Corrections++;Sound(ChangeKind.Layout);LastReason="Ручная конвертация выделения";Notify();return true;
             }
             var element=TextAccess.FocusedEditable();TextAccess.Snapshot snapshot;
@@ -379,12 +409,12 @@ public sealed class InputService : IDisposable {
             if(selected.IndexOf('\n')>=0 || selected.IndexOf('\r')>=0){LastReason="Многострочное выделение пропущено";Notify();return false;}
             string converted=engine.Convert(selected);if(converted==selected)return false;
             long generation=pump.Generation;bool sent;
-            if(!TextAccess.Replace(element,selected,converted,true,()=>CanChange(generation,w,f),out sent)){
+            if(!TextAccess.Replace(element,selected,converted,true,()=>CanChange(generation,w,f),out sent,()=>SetTextLayout(w,converted))){
                 if(sent)FailedInjection++;
                 LastReason=sent?"Поле не подтвердило результат замены":"Выделение изменилось — текст сохранён";Notify();return false;
             }
             VerifiedValueReplacements++;
-            int[] selectedId=FocusId();Reset();sequence=generation;
+            int[] selectedId=FocusId();Reset();sequence=generation;SetTextLayout(w,converted);
             lastAction=new ActionInfo{Window=w,Focus=f,ElementId=selectedId,Sequence=sequence,Before=selected,After=converted,Delimiter="",Kind=ChangeKind.Layout,At=DateTime.UtcNow,Selection=true};
             Corrections++;Sound(ChangeKind.Layout);LastReason="Ручная конвертация выделения";Notify();return true;
         }catch{LastReason="Выделение не поддерживается в этом поле";Notify();}
@@ -410,9 +440,9 @@ public sealed class InputService : IDisposable {
     bool TryUndo(){
         var a=lastAction;if(a==null || a.Window!=Native.GetForegroundWindow() || a.Sequence!=sequence || pump.Generation!=sequence || (DateTime.UtcNow-a.At).TotalSeconds>30)return false;
         IntPtr w,f,l;if(!SafeFocus(out w,out f,out l) || a.Focus!=f || (a.ElementId!=null && (currentElementId==null || !a.ElementId.SequenceEqual(currentElementId))))return false;
-        bool restored=a.NativeSelection?Native.ReplaceEditSelection(f,a.After,a.Before,true):ReplaceVerifiedTail(f,a.After+a.Delimiter,a.Before+a.Delimiter);
+        bool restored=a.NativeSelection?Native.ReplaceEditSelection(f,a.After,a.Before,true):ReplaceVerifiedTail(f,a.After+a.Delimiter,a.Before+a.Delimiter,delegate{if(a.Kind==ChangeKind.Layout)SetTextLayout(w,a.Before);});
         if(restored){
-            if(a.Kind==ChangeKind.Layout)SwitchLayout(w,l);
+            if(a.Kind==ChangeKind.Layout && a.NativeSelection)SetTextLayout(w,a.Before);
             if(a.Kind!=ChangeKind.Learned && !a.Selection && a.Before.Length<=40 && a.Before.All(char.IsLetter))Remember(a.Before,a.Before);
             word="";lastWord=a.Selection?"":a.Before;lastDelimiter=a.Selection?"":a.Delimiter;
             lastAction=null;LastReason="Последнее исправление отменено";Notify();return true;

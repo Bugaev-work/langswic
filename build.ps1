@@ -36,7 +36,7 @@ $referenceArgs = @($references | ForEach-Object { '/reference:' + $_ })
 $testReferenceArgs = @($referenceArgs + @(
   'PresentationFramework.dll','PresentationCore.dll','WindowsBase.dll','WindowsFormsIntegration.dll' |
     ForEach-Object { '/reference:' + (Join-Path $wpf $_) }
-) + @('/reference:' + (Join-Path $framework 'System.Xaml.dll')))
+) + @(('/reference:' + (Join-Path $framework 'System.Xaml.dll')), ('/reference:' + (Join-Path $wpf 'UIAutomationProvider.dll'))))
 $sources = @(Get-ChildItem $PSScriptRoot -Filter '*.cs' | ForEach-Object FullName)
 & $csc /nologo /utf8output /platform:x64 /target:winexe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'FastSwitcher.exe')) $referenceArgs $sources
 if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }

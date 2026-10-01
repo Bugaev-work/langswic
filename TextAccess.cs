@@ -63,38 +63,22 @@ internal static class TextAccess {
         snapshot=new Snapshot{All=all,Selected=selected,Start=left.Length,End=left.Length+selected.Length,Pattern=pattern,Range=range};return true;
     }
     static bool Current(AutomationElement element,Func<bool> guard){return guard() && SameElement(element,FocusedEditable());}
-    static bool WaitSelection(AutomationElement element,int start,int end,string all,string selected,Func<bool> guard){
-        for(int i=0;i<14;i++){
-            if(!Current(element,guard))return false;
-            Snapshot now;if(Read(element,out now) && now.Start==start && now.End==end && now.All==all && now.Selected==selected)return true;
-            Thread.Sleep(15);
-        }
-        return false;
-    }
     public static bool Replace(AutomationElement element,string expected,string replacement,bool selectionOnly,Func<bool> guard,out bool sent,Action onSent=null){
         sent=false;Snapshot before;if(!Current(element,guard) || !Read(element,out before))return false;
         int start=before.Start,end=before.End;
         if(before.Selected.Length==0){
             if(selectionOnly || start<expected.Length || before.All.Substring(start-expected.Length,expected.Length)!=expected)return false;
             start-=expected.Length;
-            var prefix=before.Pattern.DocumentRange.Clone();
-            prefix.MoveEndpointByRange(TextPatternRangeEndpoint.End,before.Range,TextPatternRangeEndpoint.Start);
-            var found=prefix.FindText(expected,true,false);
-            bool selected=false;
-            if(found!=null && found.CompareEndpoints(TextPatternRangeEndpoint.End,before.Range,TextPatternRangeEndpoint.Start)==0){
-                if(!Current(element,guard))return false;
-                try{found.Select();selected=WaitSelection(element,start,end,before.All,expected,guard);}catch{}
-            }
-            if(!selected){
-                if(!Current(element,guard))return false;
-                before.Range.Select();
-                if(!WaitSelection(element,before.Start,before.End,before.All,"",guard))return false;
-                if(!Current(element,guard) || !Native.SelectPrevious(new StringInfo(expected).LengthInTextElements))return false;
-                if(!WaitSelection(element,start,end,before.All,expected,guard))return false;
-            }
+            // Keyboard left movement is unambiguous for the supported RU/EN words.
+            // Reject line breaks and complex graphemes rather than guessing a range.
+            if(expected.IndexOf('\r')>=0 || expected.IndexOf('\n')>=0 || expected.IndexOf('\t')>=0 ||
+                new StringInfo(expected).LengthInTextElements!=expected.Length)return false;
         }else if(before.Selected!=expected)return false;
-        if(!WaitSelection(element,start,end,before.All,expected,guard))return false;
-        if(!Current(element,guard) || !Native.Type(replacement))return false;
+        Snapshot ready;
+        if(!Current(element,guard) || !Read(element,out ready) || ready.All!=before.All ||
+            ready.Start!=before.Start || ready.End!=before.End || ready.Selected!=before.Selected || !Current(element,guard))return false;
+        bool inserted=before.Selected.Length==0?Native.ReplacePrevious(expected.Length,replacement):Native.Type(replacement);
+        if(!inserted)return false;
         sent=true;
         if(onSent!=null)onSent();
 #if INPUT_TEST

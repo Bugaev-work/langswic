@@ -7,6 +7,9 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Windows.Automation;
+using System.Windows.Automation.Provider;
+using System.Windows.Automation.Text;
 
 namespace FastSwitcher {
 internal static class InputIntegrationTests {
@@ -35,6 +38,8 @@ internal static class InputIntegrationTests {
     }
     static void English(IntPtr target){Native.PostMessage(target,0x8001,IntPtr.Zero,IntPtr.Zero);}
     static void Russian(IntPtr target){Native.PostMessage(target,0x8002,IntPtr.Zero,IntPtr.Zero);}
+    static bool TargetLanguage(IntPtr target,int language){uint pid;return ((long)Native.GetKeyboardLayout(Native.GetWindowThreadProcessId(target,out pid))&0xffff)==language;}
+    static string LayoutInfo(IntPtr target){uint pid;uint thread=Native.GetWindowThreadProcessId(target,out pid);return "thread="+thread+" hkl="+Native.GetKeyboardLayout(thread).ToInt64().ToString("X");}
     static async Task Focus(IntPtr target){
         for(int i=0;i<15;i++){
             Native.PostMessage(target,0x8003,IntPtr.Zero,IntPtr.Zero);
@@ -60,7 +65,7 @@ internal static class InputIntegrationTests {
         }
         throw new InvalidOperationException("Rich text test target could not get focus");
     }
-    public static int Run(){
+    public static int Run(bool layoutOnly=false){
         string path=Path.Combine(Path.GetTempPath(),"fast-switcher-input-test-"+Guid.NewGuid().ToString("N")+".txt");
         string dataDir=path+".data";SettingsStore.TestDirectory=dataDir;
         Process child=null;var host=new MainForm(true);int failed=0;
@@ -75,6 +80,9 @@ internal static class InputIntegrationTests {
                 Keys(0x47,0x48,0x42,0x44,0x54,0x4E,Native.VK_SPACE);
                 if(await WaitFor(path,"привет "))Console.WriteLine("OK automatic layout in editable field");
                 else{Console.WriteLine("FAIL automatic layout: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                await Task.Delay(180);
+                if(TargetLanguage(target,0x0419))Console.WriteLine("OK ignored child language request falls back to top window and persists");
+                else{Console.WriteLine("FAIL layout persistence after RU correction: "+LayoutInfo(target)+" "+host.InputDiagnostic+" requests="+Read(path+".layout-msgs"));failed++;}
                 Russian(target);await Focus(target);SelectAll();await Task.Delay(150);
                 Keys(0x48,0x45,0x4C,0x4C,0x4F,Native.VK_SPACE);
                 if(await WaitFor(path,"hello "))Console.WriteLine("OK reverse automatic layout in editable field");
@@ -83,12 +91,15 @@ internal static class InputIntegrationTests {
                 Keys(0x47,0x4F,0x56,0x45,0x52);
                 if(await WaitFor(path,"gover"))Console.WriteLine("OK government corrected before word end");
                 else{Console.WriteLine("FAIL early government: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                if(TargetLanguage(target,0x0409))Console.WriteLine("OK early correction leaves EN active");
+                else{Console.WriteLine("FAIL early correction layout: "+LayoutInfo(target)+" "+host.InputDiagnostic+" requests="+Read(path+".layout-msgs"));failed++;}
                 Keys(0x4E,0x4D,0x45,0x4E,0x54);
                 if(await WaitFor(path,"government"))Console.WriteLine("OK government remainder after layout change");
                 else{Console.WriteLine("FAIL government remainder: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
                 await Focus(target);DoubleShift();
                 if(await WaitFor(path,"пщмуктьуте"))Console.WriteLine("OK early conversion undo after word completion");
                 else{Console.WriteLine("FAIL early conversion undo: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                if(layoutOnly)return;
                 Native.PostMessage(target,0x8004,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"привет how are");
                 await Focus(target);DoubleShift();
                 if(await WaitFor(path,"привет how фку"))Console.WriteLine("OK Double Shift changes only caret word in mixed phrase");
@@ -211,6 +222,15 @@ internal static class InputIntegrationTests {
                 Keys(0x52,0x45,0x43,0x49,0x45,0x56,0x45,Native.VK_SPACE);
                 if(await WaitFor(path,"receive "))Console.WriteLine("OK editable Custom role with verified TextPattern");
                 else{Console.WriteLine("FAIL custom editor: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                if(Read(path+".uia-selects")=="0")Console.WriteLine("OK broken UIA Select provider cannot move the correction caret");
+                else{Console.WriteLine("FAIL correction invoked broken UIA Select");failed++;}
+                Native.PostMessage(target,0x8031,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"KEEP ghbdtn tail");await Task.Delay(180);
+                int atomicCorrections=host.InputCorrections;DoubleShift();
+                if(await WaitForVerified(path,"KEEP привет tail",()=>host.InputCorrections>atomicCorrections) && Read(path+".uia-selects")=="0")Console.WriteLine("OK caret conversion succeeds with a provider whose Select collapses to document start");
+                else{Console.WriteLine("FAIL hostile UIA caret conversion: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Keys(0x46);
+                if(await WaitFor(path,"KEEP привета tail"))Console.WriteLine("OK next letter follows converted word in retained RU layout");
+                else{Console.WriteLine("FAIL typing after hostile UIA conversion: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
                 host.ForgetRuleForTest("пщмуктьуте");
                 Russian(target);Native.PostMessage(target,0x8010,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"");await FocusWpf(target);
                 TextAccess.TestPostSendDelay=500;int fastCorrections=host.InputCorrections;
@@ -230,6 +250,8 @@ internal static class InputIntegrationTests {
             if(File.Exists(path))File.Delete(path);if(File.Exists(path+".ready"))File.Delete(path+".ready");
             if(File.Exists(path+".format"))File.Delete(path+".format");
             if(File.Exists(path+".caret"))File.Delete(path+".caret");
+            if(File.Exists(path+".uia-selects"))File.Delete(path+".uia-selects");
+            if(File.Exists(path+".layout-msgs"))File.Delete(path+".layout-msgs");
             foreach(string name in new[]{"settings.json","settings.json.tmp","settings.json.corrupt"}){
                 string file=Path.Combine(dataDir,name);if(File.Exists(file))File.Delete(file);
             }
@@ -242,11 +264,18 @@ internal static class InputIntegrationTests {
         return failed==0?0:1;
     }
     sealed class TargetForm : Form {
+        public string LayoutReport;
         public TextBox Box;
         public System.Windows.Controls.TextBox WpfBox;
         public System.Windows.Controls.RichTextBox RichBox;
         public CustomEditor CustomBox;
         protected override void WndProc(ref Message m){
+            if(m.Msg==Native.WM_INPUTLANGCHANGEREQUEST){
+                // This fixture accepts language changes at its top-level window,
+                // while its native child deliberately ignores the same request.
+                long requested=m.LParam.ToInt64();Native.ActivateKeyboardLayout(m.LParam,0);m.Result=IntPtr.Zero;
+                Write(LayoutReport,"request="+requested.ToString("X")+" after="+Native.GetKeyboardLayout(0).ToInt64().ToString("X"));return;
+            }
             if(m.Msg==0x8001){var h=Native.LoadKeyboardLayout("00000409",1);if(h!=IntPtr.Zero)Native.ActivateKeyboardLayout(h,0);}
             if(m.Msg==0x8002){var h=Native.LoadKeyboardLayout("00000419",1);if(h!=IntPtr.Zero)Native.ActivateKeyboardLayout(h,0);}
             if(m.Msg==0x8003){Activate();if(Box!=null)Box.Focus();}
@@ -271,20 +300,71 @@ internal static class InputIntegrationTests {
             }
             if(m.Msg==0x8022 && RichBox!=null){Activate();RichBox.Focus();System.Windows.Input.Keyboard.Focus(RichBox);}
             if(m.Msg==0x8030 && CustomBox!=null){Activate();CustomBox.Document.Blocks.Clear();CustomBox.Document.Blocks.Add(new System.Windows.Documents.Paragraph());CustomBox.Focus();System.Windows.Input.Keyboard.Focus(CustomBox);}
+            if(m.Msg==0x8031 && CustomBox!=null){
+                CustomBox.Document.Blocks.Clear();var run=new System.Windows.Documents.Run("KEEP ghbdtn tail");
+                CustomBox.Document.Blocks.Add(new System.Windows.Documents.Paragraph(run));CustomBox.Focus();System.Windows.Input.Keyboard.Focus(CustomBox);
+                CustomBox.CaretPosition=run.ContentStart.GetPositionAtOffset(11);
+            }
             base.WndProc(ref m);
         }
     }
     sealed class CustomEditor : System.Windows.Controls.RichTextBox {
+        public string SelectReport;public int SelectCalls;
         protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer(){return new CustomPeer(this);}
     }
     sealed class CustomPeer : System.Windows.Automation.Peers.RichTextBoxAutomationPeer {
-        public CustomPeer(CustomEditor owner):base(owner){}
+        readonly CustomEditor editor;
+        public CustomPeer(CustomEditor owner):base(owner){editor=owner;}
         protected override System.Windows.Automation.Peers.AutomationControlType GetAutomationControlTypeCore(){return System.Windows.Automation.Peers.AutomationControlType.Custom;}
+        public override object GetPattern(System.Windows.Automation.Peers.PatternInterface kind){
+            var pattern=base.GetPattern(kind);
+            return kind==System.Windows.Automation.Peers.PatternInterface.Text && pattern is ITextProvider?new BrokenSelectionProvider((ITextProvider)pattern,editor):pattern;
+        }
+    }
+    // Real UIA provider with normal text/caret reads, but deliberately broken Select().
+    // It reproduces editors that collapse a selected range to the document start.
+    sealed class BrokenSelectionProvider : ITextProvider {
+        readonly ITextProvider inner;readonly CustomEditor owner;
+        public BrokenSelectionProvider(ITextProvider inner,CustomEditor owner){this.inner=inner;this.owner=owner;}
+        ITextRangeProvider[] Wrap(ITextRangeProvider[] ranges){return Array.ConvertAll(ranges,r=>new BrokenSelectionRange(r,owner) as ITextRangeProvider);}
+        public ITextRangeProvider DocumentRange{get{return new BrokenSelectionRange(inner.DocumentRange,owner);}}
+        public SupportedTextSelection SupportedTextSelection{get{return inner.SupportedTextSelection;}}
+        public ITextRangeProvider[] GetSelection(){return Wrap(inner.GetSelection());}
+        public ITextRangeProvider[] GetVisibleRanges(){return Wrap(inner.GetVisibleRanges());}
+        public ITextRangeProvider RangeFromChild(IRawElementProviderSimple child){return new BrokenSelectionRange(inner.RangeFromChild(child),owner);}
+        public ITextRangeProvider RangeFromPoint(System.Windows.Point point){return new BrokenSelectionRange(inner.RangeFromPoint(point),owner);}
+    }
+    sealed class BrokenSelectionRange : ITextRangeProvider {
+        readonly ITextRangeProvider inner;readonly CustomEditor owner;
+        public BrokenSelectionRange(ITextRangeProvider inner,CustomEditor owner){this.inner=inner;this.owner=owner;}
+        static ITextRangeProvider Unwrap(ITextRangeProvider range){var wrapped=range as BrokenSelectionRange;return wrapped==null?range:wrapped.inner;}
+        ITextRangeProvider Wrap(ITextRangeProvider range){return range==null?null:new BrokenSelectionRange(range,owner);}
+        public ITextRangeProvider Clone(){return Wrap(inner.Clone());}
+        public bool Compare(ITextRangeProvider range){return inner.Compare(Unwrap(range));}
+        public int CompareEndpoints(TextPatternRangeEndpoint endpoint,ITextRangeProvider range,TextPatternRangeEndpoint other){return inner.CompareEndpoints(endpoint,Unwrap(range),other);}
+        public void ExpandToEnclosingUnit(TextUnit unit){inner.ExpandToEnclosingUnit(unit);}
+        public ITextRangeProvider FindAttribute(int attribute,object value,bool backward){return Wrap(inner.FindAttribute(attribute,value,backward));}
+        public ITextRangeProvider FindText(string text,bool backward,bool ignoreCase){return Wrap(inner.FindText(text,backward,ignoreCase));}
+        public object GetAttributeValue(int attribute){return inner.GetAttributeValue(attribute);}
+        public double[] GetBoundingRectangles(){return inner.GetBoundingRectangles();}
+        public IRawElementProviderSimple[] GetChildren(){return inner.GetChildren();}
+        public IRawElementProviderSimple GetEnclosingElement(){return inner.GetEnclosingElement();}
+        public string GetText(int max){return inner.GetText(max);}
+        public int Move(TextUnit unit,int count){return inner.Move(unit,count);}
+        public void MoveEndpointByRange(TextPatternRangeEndpoint endpoint,ITextRangeProvider range,TextPatternRangeEndpoint other){inner.MoveEndpointByRange(endpoint,Unwrap(range),other);}
+        public int MoveEndpointByUnit(TextPatternRangeEndpoint endpoint,TextUnit unit,int count){return inner.MoveEndpointByUnit(endpoint,unit,count);}
+        public void Select(){owner.SelectCalls++;Write(owner.SelectReport,owner.SelectCalls.ToString());owner.Selection.Select(owner.Document.ContentStart,owner.Document.ContentStart);}
+        public void AddToSelection(){Select();}
+        public void RemoveFromSelection(){inner.RemoveFromSelection();}
+        public void ScrollIntoView(bool align){inner.ScrollIntoView(align);}
+    }
+    sealed class IgnoringLayoutTextBox : TextBox {
+        protected override void WndProc(ref Message message){if(message.Msg==Native.WM_INPUTLANGCHANGEREQUEST){message.Result=IntPtr.Zero;return;}base.WndProc(ref message);}
     }
     public static int Target(string path){
         Native.LoadKeyboardLayout("00000409",1);
-        var form=new TargetForm{Text="Fast Switcher input test",Width=430,Height=440,StartPosition=FormStartPosition.CenterScreen};
-        var box=new TextBox{Left=18,Top=26,Width=380,Font=new Font("Segoe UI",15)};
+        var form=new TargetForm{Text="Fast Switcher input test",Width=430,Height=440,StartPosition=FormStartPosition.CenterScreen,LayoutReport=path+".layout-msgs"};
+        var box=new IgnoringLayoutTextBox{Left=18,Top=26,Width=380,Font=new Font("Segoe UI",15)};
         form.Box=box;form.Controls.Add(box);box.TextChanged+=delegate{Write(path,box.Text);};
         var wpfBox=new System.Windows.Controls.TextBox{FontSize=20};
         var wpfHost=new System.Windows.Forms.Integration.ElementHost{Left=18,Top=82,Width=380,Height=38,Child=wpfBox};
@@ -298,7 +378,7 @@ internal static class InputIntegrationTests {
             var first=para==null?null:para.Inlines.FirstInline;
             Write(path+".format",first!=null && first.FontWeight==System.Windows.FontWeights.Bold?"bold":"plain");
         };
-        var custom=new CustomEditor{FontSize=18};form.CustomBox=custom;
+        var custom=new CustomEditor{FontSize=18,SelectReport=path+".uia-selects"};form.CustomBox=custom;Write(custom.SelectReport,"0");
         form.Controls.Add(new System.Windows.Forms.Integration.ElementHost{Left=18,Top=275,Width=380,Height=100,Child=custom});
         custom.TextChanged+=delegate{Write(path,new System.Windows.Documents.TextRange(custom.Document.ContentStart,custom.Document.ContentEnd).Text.TrimEnd('\r','\n'));};
         form.Shown+=delegate{box.Focus();Write(path,"");File.WriteAllText(path+".ready",form.Handle.ToInt64().ToString());};

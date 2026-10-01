@@ -46,10 +46,18 @@ internal static class Native {
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd,int id);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern bool PostMessage(IntPtr hwnd,uint msg,IntPtr wp,IntPtr lp);
     [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd,uint msg,IntPtr wp,IntPtr lp,uint flags,uint milliseconds,out UIntPtr result);
-    public static void RequestLayout(IntPtr focus,IntPtr window,IntPtr layout){
-        UIntPtr result;
-        if(SendMessageTimeout(focus,WM_INPUTLANGCHANGEREQUEST,IntPtr.Zero,layout,0x22,150,out result)==IntPtr.Zero)
-            PostMessage(window,WM_INPUTLANGCHANGEREQUEST,IntPtr.Zero,layout);
+    public static bool RequestLayout(IntPtr focus,IntPtr window,IntPtr layout){
+        if(focus==IntPtr.Zero || window==IntPtr.Zero || GetForegroundWindow()!=window)return false;
+        uint pid;uint thread=GetWindowThreadProcessId(focus,out pid);
+        if(thread==0)return false;
+        // A successful message delivery does not mean that the input language changed.
+        // Chromium child HWNDs can ignore the request; also address the top-level HWND.
+        // Windows defines this as a posted request. Sent requests can be ignored
+        // by frameworks that synchronize their input-language state on the queue.
+        PostMessage(focus,WM_INPUTLANGCHANGEREQUEST,(IntPtr)1,layout);
+        if(window!=focus && GetForegroundWindow()==window)
+            PostMessage(window,WM_INPUTLANGCHANGEREQUEST,(IntPtr)1,layout);
+        return GetKeyboardLayout(thread)==layout;
     }
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd,StringBuilder name,int max);
     [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hwnd,int index);
@@ -69,6 +77,17 @@ internal static class Native {
         var inputs=new INPUT[value.Length*2];
         for(int i=0;i<value.Length;i++){ inputs[i*2]=Unicode(value[i],false); inputs[i*2+1]=Unicode(value[i],true); }
         return inputs.Length==0 || SendInput((uint)inputs.Length,inputs,Marshal.SizeOf(typeof(INPUT)))==inputs.Length;
+    }
+    public static bool ReplacePrevious(int characters,string replacement){
+        if(characters<1 || characters>4096 || AsyncDown(VK_SHIFT) || AsyncDown(VK_CONTROL) || AsyncDown(VK_MENU))return false;
+        // The caller has verified the exact text immediately before the caret.
+        // Delete and insert in one batch without selection or modifier state.
+        // Frameworks that sample async Shift state can mishandle queued Shift+Left.
+        var inputs=new INPUT[characters*2+replacement.Length*2];int at=0;
+        for(int i=0;i<characters;i++){inputs[at++]=Key(VK_BACK,false);inputs[at++]=Key(VK_BACK,true);}
+        foreach(char c in replacement){inputs[at++]=Unicode(c,false);inputs[at++]=Unicode(c,true);}
+        uint inserted=SendInput((uint)at,inputs,Marshal.SizeOf(typeof(INPUT)));
+        return inserted==at;
     }
     public static bool SelectPrevious(int characters){
         if(characters<1 || characters>4096 || AsyncDown(VK_SHIFT) || AsyncDown(VK_CONTROL) || AsyncDown(VK_MENU))return false;

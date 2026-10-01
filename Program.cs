@@ -15,6 +15,7 @@ static class Program {
         if(args.Length>0&&args[0]=="--smoke-test")return SmokeTest.Run();
 #if INPUT_TEST
         if(args.Length>0&&args[0]=="--input-test")return InputIntegrationTests.Run();
+        if(args.Length>0&&args[0]=="--layout-test")return InputIntegrationTests.Run(true);
         if(args.Length>1&&args[0]=="--input-target")return InputIntegrationTests.Target(args[1]);
 #endif
         if(args.Length>0&&(args[0]=="--uninstall"||args[0]=="--uninstall-silent")){Uninstall(args[0].EndsWith("silent"));return 0;}
@@ -42,7 +43,7 @@ static class Program {
             if(!string.Equals(Application.ExecutablePath,target,StringComparison.OrdinalIgnoreCase))File.Copy(Application.ExecutablePath,target,true);
             Shortcut(StartMenu(),target);
             using(var key=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FastSwitcher")){
-                key.SetValue("DisplayName","Fast Switcher");key.SetValue("DisplayVersion","1.4.0");key.SetValue("Publisher","Личный проект");
+                key.SetValue("DisplayName","Fast Switcher");key.SetValue("DisplayVersion","1.4.1");key.SetValue("Publisher","Личный проект");
                 key.SetValue("InstallLocation",dir);key.SetValue("DisplayIcon",target);
                 key.SetValue("UninstallString","\""+target+"\" --uninstall");key.SetValue("NoModify",1,RegistryValueKind.DWord);
             }
