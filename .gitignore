@@ -1,0 +1,17 @@
+# Build output and local verification artifacts
+/dist/
+/bin/
+/obj/
+
+# IDE and user-specific files
+/.idea/
+/.vs/
+*.user
+*.suo
+*.log
+*.tmp
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
