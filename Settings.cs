@@ -53,7 +53,7 @@ public sealed class SettingsStore {
 #if INPUT_TEST
         if(!string.IsNullOrEmpty(TestDirectory))return TestDirectory;
 #endif
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"FastSwitcher");
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"langswic");
     }}
     public static string PathName {get{return Path.Combine(DirectoryPath,"settings.json");}}
     readonly JavaScriptSerializer json=new JavaScriptSerializer{MaxJsonLength=10000000};
@@ -86,10 +86,13 @@ public sealed class SettingsStore {
     public void Export(string path){ File.WriteAllText(path,json.Serialize(Current)); }
     public void Import(string path){ Current=ReadStrict(path); Save(); }
     public void SyncStartup() {
+#if INPUT_TEST
+        if(!string.IsNullOrEmpty(TestDirectory))return;
+#endif
         using(var k=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run",true)) {
             if(k==null)return;
-            if(Current.StartWithWindows)k.SetValue("FastSwitcher", "\""+System.Windows.Forms.Application.ExecutablePath+"\" --background");
-            else k.DeleteValue("FastSwitcher",false);
+            if(Current.StartWithWindows)k.SetValue("langswic", "\""+System.Windows.Forms.Application.ExecutablePath+"\" --background");
+            else k.DeleteValue("langswic",false);
         }
     }
 }

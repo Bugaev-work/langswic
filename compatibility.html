@@ -1,13 +1,14 @@
 <!doctype html>
-<html lang="ru"><meta charset="utf-8"><title>Fast Switcher — локальная проверка полей</title>
+<html lang="ru"><meta charset="utf-8"><title>langswic — локальная проверка полей</title>
 <style>
 body{font:18px/1.6 system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 24px;background:#faf8f4;color:#292823}
 h1{font-size:30px}label{display:block;margin:24px 0 8px}input,textarea,[contenteditable]{box-sizing:border-box;width:100%;font:inherit;border:1px solid #aaa;border-radius:10px;padding:12px;background:#fff;color:#222}
 input:focus,textarea:focus,[contenteditable]:focus{outline:3px solid #fa9856}textarea,[contenteditable]{min-height:90px}
 </style>
-<h1>Fast Switcher: проверка в браузере</h1>
+<h1>langswic: проверка в браузере</h1>
 <p>Эта страница работает с локального файла. У неё нет скриптов, запросов в сеть или отправки форм. В EN наберите <code>ghbdtn </code>; в RU — <code>пщмук</code>. Проверьте Double Shift с выделением и без него, затем отмену.</p>
 <label for="search">Обычная поисковая строка</label><input id="search" type="search" autocomplete="off">
+<p>Новые случаи: в RU наберите <code>0б5</code> (ожидается <code>0,5</code>) и <code>12ю345</code> (ожидается <code>12.345</code>). В EN наберите <code>{hty</code> (ожидается <code>Хрен</code>, язык RU). Проверьте продолжение числа и отмену Double Shift.</p>
 <label for="textarea">Многострочное поле</label><textarea id="textarea" spellcheck="false"></textarea>
 <label id="editlabel">Редактор contenteditable</label><div contenteditable="true" role="textbox" aria-labelledby="editlabel" aria-multiline="true" spellcheck="false"><b>KEEP </b>ghbdtn tail</div>
 <p>В редакторе поставьте курсор сразу после <code>ghbdtn</code> и нажмите Double Shift. Должно получиться <b>KEEP </b>привет tail; жирное начертание KEEP должно сохраниться.</p>

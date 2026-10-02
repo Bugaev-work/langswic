@@ -35,7 +35,7 @@ internal sealed class LayoutService : IDisposable {
             using(var buffer=new MemoryStream()){stream.CopyTo(buffer);bytes=buffer.ToArray();}
         }
         string hash;using(var sha=SHA256.Create())hash=BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-","");
-        string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"FastSwitcher.Layout."+hash+".dll");
+        string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"langswic.Layout."+hash+".dll");
         if(File.Exists(path)){
             using(var sha=SHA256.Create())if(BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(path))).Replace("-","")!=hash){LastError=13;return;}
         }else{

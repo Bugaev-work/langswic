@@ -28,13 +28,13 @@ public sealed class WindowsSpelling : IDisposable {
         try {
             factory=(IFactory)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("7AB36653-1796-484B-BDFA-E74F1DB7C1DC")));
             russian=Create(factory,"ru-RU");english=Create(factory,"en-US");
-        }catch(COMException){}catch(PlatformNotSupportedException){}
+        }catch(COMException){}catch(PlatformNotSupportedException){}catch(System.IO.IOException){}
         finally{Release(factory);}
     }
     static IChecker Create(IFactory factory,string tag){
         try{bool supported;factory.IsSupported(tag,out supported);if(!supported)return null;
             IChecker checker;factory.CreateSpellChecker(tag,out checker);return checker;
-        }catch(COMException){return null;}
+        }catch(COMException){return null;}catch(System.IO.IOException){return null;}
     }
     public bool TryIsWord(bool latin,string word,out bool known){
         known=false;var checker=latin?english:russian;
@@ -46,7 +46,7 @@ public sealed class WindowsSpelling : IDisposable {
             int result=errors.Next(out error);
             if(result<0)return false;
             known=result==1 && error==IntPtr.Zero;return true;
-        }catch(COMException){return false;}
+        }catch(COMException){return false;}catch(System.IO.IOException){return false;}
         finally{if(error!=IntPtr.Zero)Marshal.Release(error);Release(errors);}
     }
     static void Release(object value){if(value!=null && Marshal.IsComObject(value))Marshal.ReleaseComObject(value);}

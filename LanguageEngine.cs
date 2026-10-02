@@ -4,11 +4,16 @@ using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace FastSwitcher {
-public enum ChangeKind { None, Layout, Typo, Yo, Learned }
+public enum ChangeKind { None, Layout, Typo, Yo, Learned, Number }
 public sealed class Decision { public string Text; public ChangeKind Kind; public string Reason; public Decision(string text,ChangeKind kind,string reason){Text=text;Kind=kind;Reason=reason;} }
 public sealed class LanguageEngine : IDisposable {
     const string En="`qwertyuiop[]asdfghjkl;'zxcvbnm,./";
     const string Ru="ёйцукенгшщзхъфывапролджэячсмитьбю.";
+    const string EnShift="~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?";
+    const string RuShift="ЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,";
+    public static bool KeyboardLetter(char c){return char.IsLetter(c) || "`~[]{};:'\",.<>".IndexOf(c)>=0;}
+    public static bool TokenCharacter(char c){return KeyboardLetter(c) || (c>='0' && c<='9');}
+    static bool LatinKeyboardWord(string value){return value.Any(c=>c>='a'&&c<='z'||c>='A'&&c<='Z') && value.All(c=>c>='a'&&c<='z'||c>='A'&&c<='Z'||"`~[]{};:'\",.<>".IndexOf(c)>=0);}
     readonly Dictionary<char,char> enToRu=new Dictionary<char,char>(),ruToEn=new Dictionary<char,char>();
     readonly HashSet<string> ru=new HashSet<string>(StringComparer.OrdinalIgnoreCase),en=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     HashSet<string> baseRu,baseEn;
@@ -22,7 +27,9 @@ public sealed class LanguageEngine : IDisposable {
     }
     public LanguageEngine(){
         for(int i=0;i<En.Length;i++){enToRu[En[i]]=Ru[i];ruToEn[Ru[i]]=En[i];}
+        for(int i=0;i<EnShift.Length;i++){enToRu[EnShift[i]]=RuShift[i];ruToEn[RuShift[i]]=EnShift[i];}
         AddWords(ru,Lexicons.RussianWords);
+        AddWords(ru,"хрен хлеб хобби объект подъезд жизнь эхо любовь ёлка юлия");
         AddWords(en,Lexicons.EnglishWords);
         baseRu=new HashSet<string>(ru,StringComparer.OrdinalIgnoreCase);baseEn=new HashSet<string>(en,StringComparer.OrdinalIgnoreCase);
     }
@@ -34,9 +41,9 @@ public sealed class LanguageEngine : IDisposable {
     public string Convert(string value){
         var chars=value.ToCharArray();
         for(int i=0;i<chars.Length;i++){
-            char c=chars[i],lower=char.ToLowerInvariant(c),mapped;
-            if(enToRu.TryGetValue(lower,out mapped))chars[i]=char.IsUpper(c)?char.ToUpperInvariant(mapped):mapped;
-            else if(ruToEn.TryGetValue(lower,out mapped))chars[i]=char.IsUpper(c)?char.ToUpperInvariant(mapped):mapped;
+            char c=chars[i],mapped;
+            if(enToRu.TryGetValue(c,out mapped))chars[i]=mapped;
+            else if(ruToEn.TryGetValue(c,out mapped))chars[i]=mapped;
         }
         return new string(chars);
     }
@@ -59,7 +66,7 @@ public sealed class LanguageEngine : IDisposable {
         if(value==null || value.Length<5 || value.Length>32 || !settings.Layout || (app!=null && !app.Layout))
             return new Decision(value,ChangeKind.None,"префикс слишком короткий или автоматика отключена");
         if(Protected(value,context))return new Decision(value,ChangeKind.None,"защищённый префикс");
-        bool latin=Regex.IsMatch(value,@"^[A-Za-z]+$");
+        bool latin=LatinKeyboardWord(value);
         bool cyr=Regex.IsMatch(value,@"^[А-Яа-яЁё]+$");
         if(!latin && !cyr)return new Decision(value,ChangeKind.None,"смешанный префикс");
         if(settings.ExcludedWords.Any(w=>w.StartsWith(value,StringComparison.OrdinalIgnoreCase)) ||
@@ -76,6 +83,13 @@ public sealed class LanguageEngine : IDisposable {
     }
     public Decision Decide(string value,string context,Settings settings,AppRule app=null){
         if(string.IsNullOrEmpty(value))return new Decision(value,ChangeKind.None,"пусто");
+        if(Regex.IsMatch(value,@"^[0-9]+[бБюЮ][0-9]+$")){
+            if(settings.Layout && (app==null||app.Layout) &&
+                !Regex.IsMatch(context??"",@"(?:https?://|www\.|\S+@|[A-Za-zА-Яа-яЁё0-9_#\\])\S*$") &&
+                !settings.ExcludedWords.Contains(value) && !settings.Learned.ContainsKey(value.ToLowerInvariant()))
+                return new Decision(value.Replace('б',',').Replace('Б',',').Replace('ю','.').Replace('Ю','.'),ChangeKind.Number,"числовой разделитель в ошибочной раскладке");
+            return new Decision(value,ChangeKind.None,"число исключено или защищено");
+        }
         if(Protected(value,context))return new Decision(value,ChangeKind.None,"защищённый или неоднозначный токен");
         if(settings.ExcludedWords.Any(w=>string.Equals(w,value,StringComparison.OrdinalIgnoreCase)))return new Decision(value,ChangeKind.None,"слово-исключение");
         string learned;
@@ -87,11 +101,17 @@ public sealed class LanguageEngine : IDisposable {
         bool typos=settings.Typos && (app==null||app.Typos);
         bool useYo=settings.Yo && (app==null||app.Yo);
         if(layout && value.Length>=4){
-            var target=Convert(value); bool latin=Regex.IsMatch(value,@"^[A-Za-z]+$"); bool cyr=Regex.IsMatch(value,@"^[А-Яа-яЁё]+$");
+            var target=Convert(value); bool latin=LatinKeyboardWord(value); bool cyr=Regex.IsMatch(value,@"^[А-Яа-яЁё]+$");
             if((latin||cyr) && target!=value){
                 bool sourceKnown=Known(latin,value),targetKnown=Known(!latin,target);
                 if(!sourceKnown && targetKnown)return new Decision(target,ChangeKind.Layout,"слово есть только в другой раскладке");
             }
+        }
+        // A mapped key can also be ordinary trailing punctuation. Prefer a
+        // recognized whole word; otherwise retain that punctuation verbatim.
+        if(value.Length>1 && ",.;:'\"".IndexOf(value[value.Length-1])>=0){
+            var inner=Decide(value.Substring(0,value.Length-1),context,settings,app);
+            if(inner.Kind!=ChangeKind.None)return new Decision(inner.Text+value[value.Length-1],inner.Kind,inner.Reason);
         }
         string replacement;
         if(typos && Lexicons.Typos.TryGetValue(value,out replacement))return new Decision(CaseLike(value,replacement),ChangeKind.Typo,"словарная опечатка");

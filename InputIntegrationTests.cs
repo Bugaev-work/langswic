@@ -26,6 +26,7 @@ internal static class InputIntegrationTests {
         Native.SendInput(4,new[]{Raw(Native.VK_CONTROL,false),Raw(0x41,false),Raw(0x41,true),Raw(Native.VK_CONTROL,true)},Marshal.SizeOf(typeof(Native.INPUT)));
     }
     static void DoubleShift(){Keys(Native.VK_SHIFT,Native.VK_SHIFT);}
+    static void Shifted(ushort vk){Native.SendInput(4,new[]{Raw(Native.VK_SHIFT,false),Raw(vk,false),Raw(vk,true),Raw(Native.VK_SHIFT,true)},Marshal.SizeOf(typeof(Native.INPUT)));}
     static string Read(string path){try{if(!File.Exists(path))return "";using(var stream=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))using(var reader=new StreamReader(stream))return reader.ReadToEnd();}catch(IOException){return "";}}
     static void Write(string path,string value){using(var stream=new FileStream(path,FileMode.Create,FileAccess.Write,FileShare.ReadWrite))using(var writer=new StreamWriter(stream))writer.Write(value);}
     static async Task<bool> WaitFor(string path,string expected){
@@ -118,6 +119,23 @@ internal static class InputIntegrationTests {
                 if(await WaitFor(path,"gover") && TargetLanguage(target,0x0409))Console.WriteLine("OK prefix correction waits for delayed target character processing");
                 else{Console.WriteLine("FAIL delayed prefix: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
                 Native.PostMessage(target,0x800C,IntPtr.Zero,IntPtr.Zero);await Task.Delay(100);
+                Russian(target);await Focus(target);SelectAll();await Task.Delay(150);Keys(0x30,0xBC,0x35);
+                if(await WaitFor(path,"0,5") && TargetLanguage(target,0x0419))Console.WriteLine("OK decimal comma corrected immediately without changing language");
+                else{Console.WriteLine("FAIL decimal comma: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Keys(0x30,Native.VK_SPACE);await WaitFor(path,"0,50 ");DoubleShift();
+                if(await WaitFor(path,"0б50 "))Console.WriteLine("OK numeric correction undo includes continued digits");
+                else{Console.WriteLine("FAIL numeric undo: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Russian(target);await Focus(target);SelectAll();await Task.Delay(150);Keys(0x31,0x32,0xBE,0x33,0x34,0x35,Native.VK_SPACE);
+                if(await WaitFor(path,"12.345 "))Console.WriteLine("OK decimal point conversion");
+                else{Console.WriteLine("FAIL decimal point: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                English(target);await Focus(target);SelectAll();await Task.Delay(150);Shifted(0xDB);Keys(0x48,0x54,0x59,Native.VK_SPACE);
+                if(await WaitFor(path,"Хрен ") && TargetLanguage(target,0x0419))Console.WriteLine("OK shifted bracket is converted with the whole capitalized word");
+                else{Console.WriteLine("FAIL capitalized bracket word: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                DoubleShift();if(await WaitFor(path,"{hty "))Console.WriteLine("OK bracket word conversion undo");else{Console.WriteLine("FAIL bracket undo: ["+Read(path)+"]");failed++;}
+                English(target);await Focus(target);SelectAll();await Task.Delay(150);Keys(0x4A,0xBC,0xDD,0x54,0x52,0x4E,Native.VK_SPACE);
+                if(await WaitFor(path,"объект "))Console.WriteLine("OK comma and right bracket inside a word");else{Console.WriteLine("FAIL internal punctuation: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                English(target);await Focus(target);SelectAll();await Task.Delay(150);Shifted(0xC0);Keys(0x4B,0x52,0x46,Native.VK_SPACE);
+                if(await WaitFor(path,"Ёлка "))Console.WriteLine("OK shifted tilde retains capitalized yo");else{Console.WriteLine("FAIL capitalized yo: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
                 if(layoutOnly)return;
                 Native.PostMessage(target,0x8004,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"привет how are");
                 await Focus(target);DoubleShift();
@@ -229,6 +247,15 @@ internal static class InputIntegrationTests {
                     else{Console.WriteLine("FAIL password conversion");failed++;}
                 }else{Console.WriteLine("FAIL password field setup");failed++;}
                 Native.PostMessage(target,0x800A,IntPtr.Zero,IntPtr.Zero);
+                Russian(target);Native.PostMessage(target,0x8010,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"");await FocusWpf(target);
+                Keys(0x30,0xBC,0x35);
+                if(await WaitFor(path,"0,5"))Console.WriteLine("OK numeric correction through UI Automation");
+                else{Console.WriteLine("FAIL UIA decimal: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Keys(0x30,Native.VK_SPACE);await WaitFor(path,"0,50 ");DoubleShift();
+                if(await WaitFor(path,"0б50 "))Console.WriteLine("OK UIA numeric continuation undo");else{Console.WriteLine("FAIL UIA numeric undo: ["+Read(path)+"]");failed++;}
+                English(target);Native.PostMessage(target,0x8010,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"");await FocusWpf(target);Shifted(0xDB);Keys(0x48,0x54,0x59,Native.VK_SPACE);
+                if(await WaitFor(path,"Хрен ") && TargetLanguage(target,0x0419))Console.WriteLine("OK shifted punctuation word through UI Automation with retained language");
+                else{Console.WriteLine("FAIL UIA capitalized word: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
                 English(target);Native.PostMessage(target,0x8020,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"");await FocusRich(target);
                 Keys(0x52,0x45,0x43,0x49,0x45,0x56,0x45,Native.VK_SPACE);
                 if(await WaitFor(path,"receive "))Console.WriteLine("OK automatic conversion in editable Document without ValuePattern");

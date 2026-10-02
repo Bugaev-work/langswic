@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
@@ -34,7 +34,7 @@ sealed class PillButton : Button {
         using(var p=new GraphicsPath()){
             p.AddArc(r.Left,r.Top,d,d,180,90);p.AddArc(r.Right-d,r.Top,d,d,270,90);
             p.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);p.AddArc(r.Left,r.Bottom-d,d,d,90,90);p.CloseFigure();
-            using(var brush=new SolidBrush(hover?Color.FromArgb(207,70,5):BackColor))e.Graphics.FillPath(brush,p);
+            using(var brush=new SolidBrush(hover?(BackColor.GetBrightness()>.6?Color.FromArgb(221,233,252):Color.FromArgb(30,96,211)):BackColor))e.Graphics.FillPath(brush,p);
         }
         TextRenderer.DrawText(e.Graphics,Text,Font,r,ForeColor,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
         if(Focused)ControlPaint.DrawFocusRectangle(e.Graphics,new Rectangle(7,5,Width-14,Height-10),Color.White,BackColor);
@@ -44,8 +44,9 @@ public sealed class MainForm : Form {
     readonly SettingsStore store=new SettingsStore();
     readonly LanguageEngine engine=new LanguageEngine();
     InputService input;
-    Panel sidebar,content; Label title,subtitle,brandTitle,brandBadge,brandTag; NotifyIcon tray; ContextMenuStrip trayMenu;
+    Panel sidebar,content; Label title,subtitle; FeatureTile autoTile,shiftTile,smartTile; NotifyIcon tray; ContextMenuStrip trayMenu;
     readonly List<Button> nav=new List<Button>();
+    bool updatingTiles;
     readonly Dictionary<int,string> hotkeyErrors=new Dictionary<int,string>();
     Timer diagnosticTimer; bool exiting=false; int page=0;
     Color bg,card,ink,muted,accent,border,side,activeNav;
@@ -54,14 +55,16 @@ public sealed class MainForm : Form {
     public int InputVerifiedValueReplacements {get{return input==null?0:input.VerifiedValueReplacements;}}
     public int InputCorrections {get{return input==null?0:input.Corrections;}}
 #if INPUT_TEST
+    internal void SmokeTheme(){ChangeTheme();}
+    internal bool SmokeFeatures(){bool original=store.Current.Layout;autoTile.AccessibilityObject.DoDefaultAction();bool changed=store.Current.Layout!=original;autoTile.AccessibilityObject.DoDefaultAction();return changed && store.Current.Layout==original;}
     internal System.Threading.Tasks.Task DelayInputWorkerForTest(int ms){return input.DelayWorkerForTest(ms);}
     internal void ForgetRuleForTest(string word){store.Current.Learned.Remove(word);}
 #endif
-    public bool LayoutValid {get{return sidebar!=null&&content!=null&&sidebar.Right<=content.Left&&content.Width>400;}}
+    public bool LayoutValid {get{return sidebar!=null&&content!=null&&content.Top>=sidebar.Bottom&&content.Width>500;}}
     public bool SmokePages(){for(int i=0;i<6;i++){ShowPage(i);if(content.Controls.Count==0||title==null)return false;}ShowPage(0);return true;}
     public void QuitForTests(){exiting=true;Close();}
     public MainForm(bool background){
-        Text="Fast Switcher"; Width=1020;Height=740;MinimumSize=new Size(780,580);
+        Text="langswic"; Width=1000;Height=805;MinimumSize=new Size(930,740);
         StartPosition=FormStartPosition.CenterScreen; Font=new Font("Segoe UI",10);
         Icon=MakeIcon();
         engine.AddUserWords(store.Current);
@@ -69,7 +72,7 @@ public sealed class MainForm : Form {
         input=new InputService(this,store,engine);input.Changed+=UpdateStatus;
         SystemEvents.PowerModeChanged+=PowerChanged;
         Shown+=delegate{input.Start();RegisterHotkeys();if(background)Hide();};
-        FormClosing+=delegate(object s,FormClosingEventArgs e){if(!exiting && e.CloseReason==CloseReason.UserClosing){e.Cancel=true;Hide();tray.ShowBalloonTip(1500,"Fast Switcher","Программа продолжает работать в трее.",ToolTipIcon.Info);}};
+        FormClosing+=delegate(object s,FormClosingEventArgs e){if(!exiting && e.CloseReason==CloseReason.UserClosing){e.Cancel=true;Hide();tray.ShowBalloonTip(1500,"langswic","Программа продолжает работать в трее.",ToolTipIcon.Info);}};
         FormClosed+=delegate{SystemEvents.PowerModeChanged-=PowerChanged;if(input!=null)input.Dispose();engine.Dispose();UnregisterHotkeys();if(tray!=null)tray.Dispose();};
         diagnosticTimer=new Timer{Interval=1000};diagnosticTimer.Tick+=delegate{UpdateStatus();};diagnosticTimer.Start();
     }
@@ -78,51 +81,53 @@ public sealed class MainForm : Form {
         BeginInvoke((Action)(()=>{if(input==null)return;if(e.Mode==PowerModes.Suspend)input.Clear();if(e.Mode==PowerModes.Resume){input.Restart();RegisterHotkeys();}}));
     }
     static Icon MakeIcon(){
-        var bitmap=new Bitmap(64,64);using(var g=Graphics.FromImage(bitmap)){g.SmoothingMode=SmoothingMode.AntiAlias;g.Clear(Color.Transparent);using(var b=new SolidBrush(Color.FromArgb(245,105,27)))g.FillEllipse(b,2,2,60,60);using(var f=new Font("Segoe UI",34,FontStyle.Bold,GraphicsUnit.Pixel))using(var b=new SolidBrush(Color.White))g.DrawString("F",f,b,18,5);}
+        var bitmap=new Bitmap(64,64);using(var g=Graphics.FromImage(bitmap)){g.SmoothingMode=SmoothingMode.AntiAlias;g.Clear(Color.Transparent);using(var b=new SolidBrush(Color.FromArgb(36,113,243)))g.FillEllipse(b,2,2,60,60);using(var f=new Font("Segoe UI",34,FontStyle.Bold,GraphicsUnit.Pixel))using(var b=new SolidBrush(Color.White))g.DrawString("L",f,b,19,5);}
         return Icon.FromHandle(bitmap.GetHicon());
     }
     void MakeShell(){
-        sidebar=new Panel{Dock=DockStyle.Left,Width=236,Padding=new Padding(20,27,20,22)};Controls.Add(sidebar);
-        var brand=new Panel{Dock=DockStyle.Top,Height=112};
-        brandBadge=new Label{Text="F",Width=46,Height=46,Left=1,Top=3,TextAlign=ContentAlignment.MiddleCenter,Font=new Font("Segoe UI Semibold",24),ForeColor=Color.White};brand.Controls.Add(brandBadge);
-        brandTitle=new Label{Text="Fast Switcher",Left=59,Top=3,Width=142,Height=30,Font=new Font("Segoe UI Semibold",15),TextAlign=ContentAlignment.MiddleLeft};brand.Controls.Add(brandTitle);
-        brandTag=new Label{Text="ПИШИТЕ СВОБОДНО",Left=60,Top=35,Width=145,Height=22,Font=new Font("Segoe UI",8,FontStyle.Bold)};brand.Controls.Add(brandTag);
+        content=new Panel{Dock=DockStyle.Fill,AutoScroll=true};Controls.Add(content);
+        sidebar=new FlowLayoutPanel{Dock=DockStyle.Top,Height=48,Padding=new Padding(18,4,0,0),WrapContents=false};Controls.Add(sidebar);
         string[] names={"Обзор","Настройки","Исключения","Словари","Горячие клавиши","Диагностика"};
-        for(int i=names.Length-1;i>=0;i--){int index=i;var b=new Button{Text=names[i],Height=48,Dock=DockStyle.Top,FlatStyle=FlatStyle.Flat,TextAlign=ContentAlignment.MiddleLeft,Padding=new Padding(15,0,0,0),TabIndex=i+1,Font=new Font("Segoe UI Semibold",10)};b.FlatAppearance.BorderSize=0;b.Click+=delegate{ShowPage(index);};sidebar.Controls.Add(b);nav.Insert(0,b);}
-        sidebar.Controls.Add(brand);
-        var theme=new Button{Text="◐   Сменить тему",Height=46,Dock=DockStyle.Bottom,FlatStyle=FlatStyle.Flat,TextAlign=ContentAlignment.MiddleLeft,Padding=new Padding(15,0,0,0)};theme.FlatAppearance.BorderSize=0;theme.Click+=delegate{store.Current.DarkTheme=!store.Current.DarkTheme;store.Save();SetTheme();ShowPage(page);};sidebar.Controls.Add(theme);
-        content=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(38,30,38,30)};Controls.Add(content);content.BringToFront();
+        for(int i=0;i<names.Length;i++){int index=i;var b=new Button{Text=names[i],Width=i==4?155:130,Height=38,FlatStyle=FlatStyle.Flat,TabIndex=i,Font=new Font("Segoe UI Semibold",10),Margin=new Padding(2,0,2,0)};b.FlatAppearance.BorderSize=0;b.Click+=delegate{ShowPage(index);};sidebar.Controls.Add(b);nav.Add(b);}
+        Controls.Add(new BlueHeader{Dock=DockStyle.Top,Height=128});
+        var menu=new MenuStrip{Dock=DockStyle.Top,Font=new Font("Segoe UI",10)};MainMenuStrip=menu;
+        var file=new ToolStripMenuItem("Файл");file.DropDownItems.Add("Настройки",null,delegate{ShowPage(1);});file.DropDownItems.Add("Скрыть в трей",null,delegate{Hide();});file.DropDownItems.Add("Выход",null,delegate{exiting=true;Close();});
+        var edit=new ToolStripMenuItem("Правка");edit.DropDownItems.Add("Исключения",null,delegate{ShowPage(2);});edit.DropDownItems.Add("Словари и обучение",null,delegate{ShowPage(3);});edit.DropDownItems.Add("Горячие клавиши",null,delegate{ShowPage(4);});
+        var view=new ToolStripMenuItem("Вид");view.DropDownItems.Add("Светлая / тёмная тема",null,delegate{ChangeTheme();});
+        var help=new ToolStripMenuItem("Справка");help.DropDownItems.Add("Диагностика",null,delegate{ShowPage(5);});help.DropDownItems.Add("О программе",null,delegate{MessageBox.Show("langswic 1.5.0\nЛокальное переключение RU / EN.\nБез аккаунта, подписки и передачи текста в сеть.","langswic");});
+        menu.Items.AddRange(new ToolStripItem[]{file,edit,view,help});Controls.Add(menu);
+        var footer=new Panel{Dock=DockStyle.Bottom,Height=36,Padding=new Padding(22,0,20,0)};
+        footer.Controls.Add(new Label{Text="v. 1.5.0   ·   Только на этом компьютере",Dock=DockStyle.Left,Width=400,TextAlign=ContentAlignment.MiddleLeft});
+        var theme=new Button{Text="Сменить тему",Dock=DockStyle.Right,Width=135,FlatStyle=FlatStyle.Flat};theme.FlatAppearance.BorderSize=0;theme.Click+=delegate{ChangeTheme();};footer.Controls.Add(theme);Controls.Add(footer);
         trayMenu=new ContextMenuStrip();
-        trayMenu.Items.Add("Открыть Fast Switcher",null,delegate{Show();WindowState=FormWindowState.Normal;Activate();});
+        trayMenu.Items.Add("Открыть langswic",null,delegate{Show();WindowState=FormWindowState.Normal;Activate();});
         trayMenu.Items.Add("Включить / выключить",null,delegate{store.Current.Enabled=!store.Current.Enabled;store.Save();UpdateStatus();});
-        trayMenu.Items.Add(new ToolStripSeparator());
-        trayMenu.Items.Add("Выход",null,delegate{exiting=true;Close();});
-        tray=new NotifyIcon{Icon=Icon,Text="Fast Switcher",Visible=true,ContextMenuStrip=trayMenu};
-        tray.DoubleClick+=delegate{Show();WindowState=FormWindowState.Normal;Activate();};
+        trayMenu.Items.Add(new ToolStripSeparator());trayMenu.Items.Add("Выход",null,delegate{exiting=true;Close();});
+        tray=new NotifyIcon{Icon=Icon,Text="langswic",Visible=true,ContextMenuStrip=trayMenu};tray.DoubleClick+=delegate{Show();WindowState=FormWindowState.Normal;Activate();};
     }
+    void ChangeTheme(){store.Current.DarkTheme=!store.Current.DarkTheme;store.Save();SetTheme();ShowPage(page);}
     void SetTheme(){
         bool dark=store.Current.DarkTheme;
-        bg=dark?Color.FromArgb(23,24,25):Color.FromArgb(255,250,244);
-        card=dark?Color.FromArgb(36,37,39):Color.White;
-        side=dark?Color.FromArgb(29,30,32):Color.FromArgb(255,246,235);
-        ink=dark?Color.FromArgb(247,245,242):Color.FromArgb(31,30,29);
-        muted=dark?Color.FromArgb(172,169,165):Color.FromArgb(112,107,103);
-        accent=dark?Color.FromArgb(255,138,66):Color.FromArgb(235,92,18);
-        border=dark?Color.FromArgb(64,63,61):Color.FromArgb(239,224,208);
-        activeNav=dark?Color.FromArgb(71,47,34):Color.FromArgb(255,228,206);
-        BackColor=bg;sidebar.BackColor=side;sidebar.ForeColor=ink;content.BackColor=bg;
-        brandTitle.ForeColor=ink;brandTag.ForeColor=muted;brandBadge.BackColor=accent;
-        foreach(Control c in sidebar.Controls){if(c is Button){c.ForeColor=ink;c.BackColor=side;((Button)c).FlatAppearance.MouseOverBackColor=activeNav;}}
-        ForeColor=ink;
+        bg=dark?Color.FromArgb(23,28,39):Color.White;
+        card=dark?Color.FromArgb(31,38,52):Color.FromArgb(250,251,254);
+        side=dark?Color.FromArgb(27,33,45):Color.FromArgb(246,248,252);
+        ink=dark?Color.FromArgb(238,243,252):Color.FromArgb(26,31,53);
+        muted=dark?Color.FromArgb(168,180,202):Color.FromArgb(111,119,143);
+        accent=Color.FromArgb(36,113,243);border=dark?Color.FromArgb(62,72,91):Color.FromArgb(228,233,243);
+        activeNav=dark?Color.FromArgb(40,59,87):Color.FromArgb(230,239,255);
+        BackColor=bg;ForeColor=ink;sidebar.BackColor=side;content.BackColor=bg;
+        foreach(var button in nav){button.ForeColor=ink;button.BackColor=side;button.FlatAppearance.MouseOverBackColor=activeNav;}
+        foreach(Control child in Controls){if(child is BlueHeader || child==content || child==sidebar)continue;child.BackColor=side;child.ForeColor=muted;foreach(Control item in child.Controls){item.BackColor=side;item.ForeColor=muted;}}
+        MainMenuStrip.ForeColor=ink;
     }
     void ShowPage(int index){
-        page=index;content.SuspendLayout();foreach(Control old in content.Controls.Cast<Control>().ToArray())old.Dispose();content.Controls.Clear();subtitle=null;
+        page=index;content.SuspendLayout();foreach(Control old in content.Controls.Cast<Control>().ToArray())old.Dispose();content.Controls.Clear();subtitle=null;autoTile=shiftTile=smartTile=null;
         foreach(var b in nav){b.BackColor=nav.IndexOf(b)==index?activeNav:side;b.ForeColor=nav.IndexOf(b)==index?accent:ink;}
-        var host=new FlowLayoutPanel{FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,Width=Math.Max(500,content.ClientSize.Width-76),Location=new Point(34,25),Padding=new Padding(0),Margin=new Padding(0)};
+        var host=new FlowLayoutPanel{FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,Width=Math.Max(500,content.ClientSize.Width-48),Location=new Point(24,16),Padding=new Padding(0),Margin=new Padding(0)};
         content.Controls.Add(host);
         string[] names={"Обзор","Настройки","Исключения","Словари","Горячие клавиши","Диагностика"};
-        var eyebrow=TextLabel("FAST SWITCHER   /   "+names[index].ToUpperInvariant(),9,FontStyle.Bold,25);eyebrow.ForeColor=accent;host.Controls.Add(eyebrow);
-        title=TextLabel(names[index],28,FontStyle.Bold,69);host.Controls.Add(title);
+        var eyebrow=TextLabel("LANGSWIC   /   "+names[index].ToUpperInvariant(),9,FontStyle.Bold,25);eyebrow.ForeColor=accent;if(index!=0)host.Controls.Add(eyebrow);else eyebrow.Dispose();
+        title=TextLabel(names[index],28,FontStyle.Bold,69);if(index!=0)host.Controls.Add(title);else title.Visible=false;
         switch(index){case 0:Overview(host);break;case 1:SettingsPage(host);break;case 2:ExceptionsPage(host);break;case 3:DictionariesPage(host);break;case 4:HotkeysPage(host);break;case 5:DiagnosticsPage(host);break;}
         content.ResumeLayout();UpdateStatus();
     }
@@ -135,18 +140,29 @@ public sealed class MainForm : Form {
         if(!string.IsNullOrEmpty(description))body.Controls.Add(new Label{Text=description,ForeColor=muted,Height=44,Width=body.Width});
         return body;
     }
-    Button ActionButton(string text,Action action,int width=170){var b=new PillButton{Text=text,Width=width,Height=40,FlatStyle=FlatStyle.Flat,BackColor=accent,ForeColor=Color.White,Margin=new Padding(0,7,10,7),Font=new Font("Segoe UI Semibold",10)};b.FlatAppearance.BorderSize=0;b.FlatAppearance.MouseOverBackColor=Color.FromArgb(207,70,5);b.Click+=delegate{action();};return b;}
-    CheckBox Toggle(string text,bool value,Action<bool> changed){var c=new CheckBox{Text=text,Checked=value,AutoSize=false,Width=600,Height=42,ForeColor=ink,BackColor=card,Margin=new Padding(0,2,0,2),FlatStyle=FlatStyle.Flat};c.CheckedChanged+=delegate{changed(c.Checked);store.Save();UpdateStatus();};return c;}
+    Button ActionButton(string text,Action action,int width=170){var b=new PillButton{Text=text,Width=width,Height=40,FlatStyle=FlatStyle.Flat,BackColor=accent,ForeColor=Color.White,Margin=new Padding(0,7,10,7),Font=new Font("Segoe UI Semibold",10)};b.FlatAppearance.BorderSize=0;b.FlatAppearance.MouseOverBackColor=Color.FromArgb(30,96,211);b.Click+=delegate{action();};return b;}
+    CheckBox Toggle(string text,bool value,Action<bool> changed){var c=new CheckBox{Text=text,Checked=value,AutoSize=false,Width=Math.Max(500,content.ClientSize.Width-130),Height=42,ForeColor=ink,BackColor=card,Margin=new Padding(0,2,0,2),FlatStyle=FlatStyle.Flat};c.CheckedChanged+=delegate{changed(c.Checked);store.Save();UpdateStatus();};return c;}
     FlowLayoutPanel Row(){return new FlowLayoutPanel{FlowDirection=FlowDirection.LeftToRight,WrapContents=false,AutoSize=true,Width=Math.Max(380,content.ClientSize.Width-135),Margin=new Padding(0,3,0,3)};}
     void Overview(FlowLayoutPanel host){
-        var c=Card(host,"Пишет вместе с вами","Исправляет уверенно распознанные слова после пробела или некоторых знаков препинания. Неоднозначные слова сохраняет.");
-        subtitle=new Label{Width=c.Width,Height=36,Font=new Font("Segoe UI Semibold",15),ForeColor=accent};c.Controls.Add(subtitle);
-        var row=Row();row.Controls.Add(ActionButton("Включить / выключить",delegate{store.Current.Enabled=!store.Current.Enabled;store.Save();UpdateStatus();},195));row.Controls.Add(ActionButton("Горячие клавиши",delegate{ShowPage(4);},175));c.Controls.Add(row);
-        c=Card(host,"Быстрые действия","Double Shift сначала преобразует выделенный текст; повторное нажатие отменяет последнее исправление. Без выделения преобразуется последнее слово. Pause/Break работает так же.");
-        c.Controls.Add(new Label{Text="Настройте сочетания и исключения в разделах слева. Настройки и выученные правила хранятся только на этом компьютере.",Width=c.Width,Height=60,ForeColor=ink});
-        c=Card(host,"Проверка алгоритма","Введите пример без передачи данных в другие программы.");
-        var inputBox=new TextBox{Width=320,Height=32,Font=Font};var result=new Label{Width=c.Width,Height=50,ForeColor=ink};
-        var r=Row();r.Controls.Add(inputBox);r.Controls.Add(ActionButton("Проверить",delegate{var d=engine.Decide(inputBox.Text,"",store.Current);result.Text=d.Kind==ChangeKind.None?"Без изменения: "+d.Reason:d.Text+"  ·  "+d.Reason;},120));c.Controls.Add(r);c.Controls.Add(result);
+        var tiles=new TableLayoutPanel{Width=host.Width,Height=223,ColumnCount=3,RowCount=1,Margin=new Padding(0,0,0,8)};
+        for(int i=0;i<3;i++)tiles.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,33.333f));
+        autoTile=MakeTile("Автопереключение",0,Color.FromArgb(30,158,60),Color.FromArgb(234,248,239),store.Current.Enabled&&store.Current.Layout,v=>{store.Current.Layout=v;if(v)store.Current.Enabled=true;});
+        shiftTile=MakeTile("Single Shift",1,accent,Color.FromArgb(231,240,255),store.Current.SingleShift,v=>store.Current.SingleShift=v);
+        smartTile=MakeTile("Интеллект",2,Color.FromArgb(124,61,229),Color.FromArgb(244,237,255),store.Current.Typos||store.Current.Yo,v=>{store.Current.Typos=v;store.Current.Yo=v;});
+        tiles.Controls.Add(autoTile,0,0);tiles.Controls.Add(shiftTile,1,0);tiles.Controls.Add(smartTile,2,0);host.Controls.Add(tiles);
+        var tips=new TableLayoutPanel{Width=host.Width,Height=114,ColumnCount=2,RowCount=3,Margin=new Padding(0,5,0,12)};
+        tips.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,230));tips.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+        string[] keys={"Double Shift","Single Shift",store.Current.ToggleHotkey};
+        string[] descriptions={"Последнее слово или выделение; повтор — отмена","Поменять текущую раскладку клавиатуры","Включить или выключить автоматику"};
+        for(int i=0;i<3;i++){tips.RowStyles.Add(new RowStyle(SizeType.Absolute,38));tips.Controls.Add(new Label{Text=keys[i],Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleRight,ForeColor=ink,Font=new Font("Segoe UI Semibold",12)},0,i);tips.Controls.Add(new Label{Text=" — "+descriptions[i],Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,ForeColor=muted,Font=new Font("Segoe UI",11)},1,i);}
+        host.Controls.Add(tips);host.Controls.Add(new Panel{Width=host.Width,Height=1,BackColor=border,Margin=new Padding(0,0,0,14)});
+        var actions=Row();actions.Width=host.Width;actions.WrapContents=true;
+        string[] labels={"Настройки","Исключения","Словари","Горячие клавиши","Диагностика"};
+        for(int i=0;i<labels.Length;i++){int index=i+1;var button=ActionButton(labels[i],()=>ShowPage(index),i==3?175:155);button.BackColor=side;button.ForeColor=ink;actions.Controls.Add(button);}host.Controls.Add(actions);
+    }
+    FeatureTile MakeTile(string text,int symbol,Color color,Color surface,bool value,Action<bool> changed){
+        var tile=new FeatureTile{Text=text,AccessibleName=text,Symbol=symbol,Accent=color,Surface=store.Current.DarkTheme?Color.FromArgb(40,47,66):surface,Ink=ink,Muted=muted,BackColor=bg,Checked=value,Dock=DockStyle.Fill,Margin=new Padding(8,0,8,0)};
+        tile.CheckedChanged+=delegate{if(updatingTiles)return;changed(tile.Checked);store.Save();if(input!=null)input.Clear();UpdateStatus();};return tile;
     }
     void SettingsPage(FlowLayoutPanel host){
         var c=Card(host,"Автоматика","Каждый вид исправления можно выключить отдельно.");
@@ -154,7 +170,7 @@ public sealed class MainForm : Form {
         c.Controls.Add(Toggle("Ошибочная раскладка RU ↔ EN",store.Current.Layout,v=>store.Current.Layout=v));
         c.Controls.Add(Toggle("Распространённые опечатки и регистр",store.Current.Typos,v=>store.Current.Typos=v));
         c.Controls.Add(Toggle("Однозначные формы с «ё»",store.Current.Yo,v=>store.Current.Yo=v));
-        c=Card(host,"Работа в Windows","Fast Switcher запускается в трее. Закрытие окна сворачивает его в трей.");
+        c=Card(host,"Работа в Windows","langswic запускается в трее. Закрытие окна сворачивает его в трей.");
         c.Controls.Add(Toggle("Запускать при входе в Windows",store.Current.StartWithWindows,v=>store.Current.StartWithWindows=v));
         c=Card(host,"Звуки","Используйте WAV-файлы. Если файл не задан, звучит системный сигнал.");
         c.Controls.Add(Toggle("Звук при переключении раскладки",store.Current.SoundLayout,v=>store.Current.SoundLayout=v));
@@ -162,7 +178,7 @@ public sealed class MainForm : Form {
         c.Controls.Add(Toggle("Звук при исправлении опечатки",store.Current.SoundTypos,v=>store.Current.SoundTypos=v));
         c.Controls.Add(SoundPicker("Файл опечатки",store.Current.TypoSoundFile,v=>store.Current.TypoSoundFile=v));
         c=Card(host,"Перенос данных","Экспорт содержит настройки, исключения, пользовательские слова и выученные правила.");
-        var row=Row();row.Controls.Add(ActionButton("Экспорт JSON",delegate{using(var d=new System.Windows.Forms.SaveFileDialog{Filter="JSON (*.json)|*.json",FileName="fast-switcher-settings.json"})if(d.ShowDialog()==DialogResult.OK)store.Export(d.FileName);},150));
+        var row=Row();row.Controls.Add(ActionButton("Экспорт JSON",delegate{using(var d=new System.Windows.Forms.SaveFileDialog{Filter="JSON (*.json)|*.json",FileName="langswic-settings.json"})if(d.ShowDialog()==DialogResult.OK)store.Export(d.FileName);},150));
         row.Controls.Add(ActionButton("Импорт JSON",delegate{using(var d=new System.Windows.Forms.OpenFileDialog{Filter="JSON (*.json)|*.json"})if(d.ShowDialog()==DialogResult.OK){try{store.Import(d.FileName);engine.AddUserWords(store.Current);RegisterHotkeys();ShowPage(page);}catch(Exception e){MessageBox.Show(e.Message,"Ошибка импорта",MessageBoxButtons.OK,MessageBoxIcon.Error);}}},150));c.Controls.Add(row);
     }
     FlowLayoutPanel SoundPicker(string caption,string value,Action<string> set){var r=Row();var box=new TextBox{Text=value,Width=390};r.Controls.Add(box);r.Controls.Add(ActionButton("Выбрать WAV",delegate{using(var d=new System.Windows.Forms.OpenFileDialog{Filter="WAV (*.wav)|*.wav"})if(d.ShowDialog()==DialogResult.OK){box.Text=d.FileName;set(box.Text);store.Save();}},135));box.Leave+=delegate{set(box.Text);store.Save();};return r;}
@@ -175,7 +191,7 @@ public sealed class MainForm : Form {
         var grid=new DataGridView{Width=c.Width-8,Height=250,DataSource=binding,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,RowHeadersVisible=false,AllowUserToAddRows=true,BackgroundColor=card,ForeColor=ink};
         if(grid.Columns.Count>=4){grid.Columns[0].HeaderText="Процесс";grid.Columns[1].HeaderText="Раскладка";grid.Columns[2].HeaderText="Опечатки";grid.Columns[3].HeaderText="Ё";}
         c.Controls.Add(grid);
-        c.Controls.Add(ActionButton("Сохранить правила",delegate{grid.EndEdit();store.Current.Apps=binding.Where(a=>!string.IsNullOrWhiteSpace(a.Process)).Select(a=>new AppRule{Process=a.Process.Trim().Replace(".exe","").ToLowerInvariant(),Layout=a.Layout,Typos=a.Typos,Yo=a.Yo}).ToList();store.Save();MessageBox.Show("Правила сохранены.","Fast Switcher");},165));
+        c.Controls.Add(ActionButton("Сохранить правила",delegate{grid.EndEdit();store.Current.Apps=binding.Where(a=>!string.IsNullOrWhiteSpace(a.Process)).Select(a=>new AppRule{Process=a.Process.Trim().Replace(".exe","").ToLowerInvariant(),Layout=a.Layout,Typos=a.Typos,Yo=a.Yo}).ToList();store.Save();MessageBox.Show("Правила сохранены.","langswic");},165));
     }
     static List<string> Lines(string text){return text.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).Where(s=>s.Length>0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();}
     void DictionariesPage(FlowLayoutPanel host){
@@ -215,9 +231,10 @@ public sealed class MainForm : Form {
     }
     void UpdateStatus(){
         if(IsDisposed || input==null)return;
-        tray.Text=store.Current.Enabled?"Fast Switcher · автоматика включена":"Fast Switcher · автоматика выключена";
+        if(autoTile!=null){updatingTiles=true;try{autoTile.Checked=store.Current.Enabled&&store.Current.Layout;shiftTile.Checked=store.Current.SingleShift;smartTile.Checked=store.Current.Typos||store.Current.Yo;}finally{updatingTiles=false;}}
+        tray.Text=store.Current.Enabled?"langswic · автоматика включена":"langswic · автоматика выключена";
         if(subtitle!=null&&!subtitle.IsDisposed){
-            if(page==0)subtitle.Text=store.Current.Enabled?"● Автоматика включена":"○ Автоматика выключена";
+            if(page==0)subtitle.Text=store.Current.Enabled?"Автоматика включена · локальная обработка текста":"Автоматика выключена · ручные команды доступны";
             if(page==5)subtitle.Text="Перехват: "+(input.HookActive?"активен":"нет")+"\r\n"+engine.DictionaryStatus+"\r\nАктивное приложение: "+input.ActiveProcess+"\r\nИсправлений за сеанс: "+input.Corrections+"\r\nЗащищённых или неподдерживаемых полей: "+input.SkippedProtected+"\r\nОшибок ввода: "+input.FailedInjection+"\r\nНеподтверждённых смен раскладки: "+input.FailedLayoutChanges+"\r\n"+input.LayoutDiagnostic+"\r\nПоследнее решение: "+input.LastReason;
         }
     }

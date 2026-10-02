@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -170,7 +170,9 @@ public sealed class InputService : IDisposable {
             string typed=Native.Typed(k.vk,k.scan,layout,shiftPressed);
             if(typed.Length!=1){if(k.vk==Native.VK_RETURN||k.vk==Native.VK_TAB)Reset();return IntPtr.Zero;}
             char ch=typed[0];
-            if(Letter(ch)){
+            bool tokenCharacter=LanguageEngine.TokenCharacter(ch) &&
+                (Letter(ch) || char.IsDigit(ch) || ((long)layout&0xffff)==0x0409);
+            if(tokenCharacter){
                 if(earlyWord){
                     bool sourceLayout=((long)layout&0xffff)==earlySourceLanguage;
                     char corrected=sourceLayout?engine.Convert(ch.ToString())[0]:ch;
@@ -181,8 +183,11 @@ public sealed class InputService : IDisposable {
                     return IntPtr.Zero;
                 }
                 if(word.Length<64)word+=ch;else Reset();
+                if(lastAction!=null && lastAction.Kind==ChangeKind.Number && char.IsDigit(ch) && word==lastAction.After+ch){
+                    lastAction.Before+=ch;lastAction.After=word;lastAction.Sequence=sequence;
+                }
                 context=(context+ch);if(context.Length>128)context=context.Substring(context.Length-128);
-                if(word.Length>=5 && word.Length<=32){
+                if(word.Length>=3 && word.Length<=32){
                     SchedulePrefixCorrection(window,focus,layout);
                 }
             }else{
@@ -190,6 +195,7 @@ public sealed class InputService : IDisposable {
                 string completed=word; word="";
                 string delim=typed;
                 lastWord=completed;lastDelimiter=delim;
+                if(lastAction!=null && lastAction.Kind==ChangeKind.Number && lastAction.After==completed){lastAction.Delimiter=delim;lastAction.Sequence=sequence;}
                 context=(context+delim);if(context.Length>128)context=context.Substring(context.Length-128);
                 if(earlyWord){
                     string target=engine.Convert(earlyOriginal);
@@ -240,9 +246,9 @@ public sealed class InputService : IDisposable {
     void SchedulePrefixCorrection(IntPtr window,IntPtr focus,IntPtr layout){
         int token=++prefixToken;
         var timer=CreateTimer(25);int attempts=0;Action finish=()=>{timer.Stop();timer.Dispose();};timer.Tick+=delegate{
-            if(token!=prefixToken || earlyWord || word.Length<5 || word.Length>32 || pump.Generation!=sequence){finish();return;}
+            if(token!=prefixToken || earlyWord || word.Length<3 || word.Length>32 || pump.Generation!=sequence){finish();return;}
             IntPtr w,f,l;if(!SafeFocus(out w,out f,out l) || w!=window || f!=focus){finish();return;}
-            string actual,ending;if(!ReadWordAtCaret(f,out actual,out ending) || ending.Length!=0 || actual!=word){
+            string actual,ending;if(!ReadWordAtCaret(f,out actual,out ending,true) || ending.Length!=0 || actual!=word){
                 // Hook events precede the target's WM_CHAR. Allow its text/caret
                 // to catch up without losing an otherwise valid prefix check.
                 if(++attempts>=10)finish();return;
@@ -253,6 +259,15 @@ public sealed class InputService : IDisposable {
             var decision=engine.DecidePrefix(word,preceding,store.Current,policy);
             if(decision.Kind==ChangeKind.None)decision=engine.Decide(word,preceding,store.Current,policy);
             if(token!=prefixToken || pump.Generation!=sequence || !SafeFocus(out w,out f,out l) || w!=window || f!=focus)return;
+            if(decision.Kind==ChangeKind.Number){
+                string original=word;
+                if(ReplaceVerifiedTail(f,original,decision.Text)){
+                    word=decision.Text;context=preceding+word;
+                    lastAction=new ActionInfo{Window=w,Focus=f,ElementId=FocusId(),Sequence=sequence,Before=original,After=word,Delimiter="",Kind=ChangeKind.Number,At=DateTime.UtcNow};
+                    Corrections++;LastReason=decision.Reason;Sound(ChangeKind.Number);Notify();
+                }
+                return;
+            }
             if(decision.Kind!=ChangeKind.Layout || !HasOppositeLayout(l))return;
             bool started=false;
             bool replaced=ReplaceVerifiedTail(f,actual,decision.Text,delegate{started=true;ApplyEarlyCorrection(w,f,l,actual,decision,preceding);});
@@ -272,7 +287,7 @@ public sealed class InputService : IDisposable {
             if(pump.Generation!=atSequence || sequence!=atSequence || earlyWord || !store.Current.Enabled){finish();return;}
             IntPtr w,f,l;if(!SafeFocus(out w,out f,out l) || w!=window || f!=focus){finish();return;}
             string actual,ending;
-            if(!ReadWordAtCaret(f,out actual,out ending) || actual!=original || ending!=delimiter){
+            if(!ReadWordAtCaret(f,out actual,out ending,true) || actual!=original || ending!=delimiter){
                 if(++attempts>=10){finish();LastReason="Поле не подтвердило завершённое слово — текст сохранён";Notify();}
                 return;
             }
@@ -356,15 +371,15 @@ public sealed class InputService : IDisposable {
             Corrections++;Sound(ChangeKind.Layout);LastReason="Ручная конвертация слова";Notify();
         }
     }
-    static bool SplitCaretWord(string before,out string source,out string delimiter){
+    static bool SplitCaretWord(string before,out string source,out string delimiter,bool includeTrailingSymbols){
         source="";delimiter="";if(string.IsNullOrEmpty(before))return false;
         int end=before.Length;
         char trailing=before[end-1];
-        if(char.IsWhiteSpace(trailing)||trailing==','||trailing=='!'||trailing=='?'||trailing==';'){
+        if(char.IsWhiteSpace(trailing)||trailing=='!'||trailing=='?'||(!includeTrailingSymbols && ",.;".IndexOf(trailing)>=0)){
             delimiter=trailing.ToString();end--;
         }
         int start=end;
-        while(start>0 && Letter(before[start-1]))start--;
+        while(start>0 && LanguageEngine.TokenCharacter(before[start-1]))start--;
         if(start==end || end-start>64)return false;
         source=before.Substring(start,end-start);return true;
     }
@@ -374,16 +389,16 @@ public sealed class InputService : IDisposable {
         var info=new Native.GUITHREADINFO{cbSize=Marshal.SizeOf(typeof(Native.GUITHREADINFO))};
         return Native.GetGUIThreadInfo(thread,ref info) && info.hwndFocus==focus;
     }
-    bool ReadWordAtCaret(IntPtr focus,out string source,out string delimiter){
+    bool ReadWordAtCaret(IntPtr focus,out string source,out string delimiter,bool includeTrailingSymbols=false){
         source="";delimiter="";Native.EditSnapshot edit;
         if(Native.TryGetEditSnapshot(focus,out edit))
-            return edit.Start==edit.End && (edit.Start==edit.Text.Length || !Letter(edit.Text[edit.Start]))
-                && SplitCaretWord(edit.Text.Substring(0,edit.Start),out source,out delimiter);
+            return edit.Start==edit.End && (edit.Start==edit.Text.Length || !LanguageEngine.TokenCharacter(edit.Text[edit.Start]))
+                && SplitCaretWord(edit.Text.Substring(0,edit.Start),out source,out delimiter,includeTrailingSymbols);
         try{
             TextAccess.Snapshot snapshot;
             if(!TextAccess.Read(TextAccess.FocusedEditable(),out snapshot) || snapshot.Start!=snapshot.End)return false;
-            if(snapshot.Start<snapshot.All.Length && Letter(snapshot.All[snapshot.Start]))return false;
-            return SplitCaretWord(snapshot.All.Substring(0,snapshot.Start),out source,out delimiter);
+            if(snapshot.Start<snapshot.All.Length && LanguageEngine.TokenCharacter(snapshot.All[snapshot.Start]))return false;
+            return SplitCaretWord(snapshot.All.Substring(0,snapshot.Start),out source,out delimiter,includeTrailingSymbols);
         }catch{return false;}
     }
     public void ManualOrUndo(){Post(()=>AfterModifiers(ManualOrUndoCore));}

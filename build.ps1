@@ -15,17 +15,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Native input-language module build failed.' }
 $nativeResource = '/resource:' + $nativeDll + ',FastSwitcher.NativeLayout64'
 $assets = Join-Path $PSScriptRoot 'assets'
 New-Item -ItemType Directory -Path $assets -Force | Out-Null
-$iconPath = Join-Path $assets 'FastSwitcher.ico'
+$iconPath = Join-Path $assets 'langswic.ico'
 Add-Type -AssemblyName System.Drawing
 $bitmap = New-Object System.Drawing.Bitmap(64, 64)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 $graphics.Clear([System.Drawing.Color]::Transparent)
-$orange = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(245, 105, 27))
+$orange = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(36, 113, 243))
 $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
 $font = New-Object System.Drawing.Font('Segoe UI', 34, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
 $graphics.FillEllipse($orange, 2, 2, 60, 60)
-$graphics.DrawString('F', $font, $white, 18, 5)
+$graphics.DrawString('L', $font, $white, 18, 5)
 $icon = [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
 $stream = [System.IO.File]::Create($iconPath)
 $icon.Save($stream)
@@ -46,19 +46,19 @@ $testReferenceArgs = @($referenceArgs + @(
     ForEach-Object { '/reference:' + (Join-Path $wpf $_) }
 ) + @(('/reference:' + (Join-Path $framework 'System.Xaml.dll')), ('/reference:' + (Join-Path $wpf 'UIAutomationProvider.dll'))))
 $sources = @(Get-ChildItem $PSScriptRoot -Filter '*.cs' | ForEach-Object FullName)
-& $csc /nologo /utf8output /platform:x64 /target:winexe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'FastSwitcher.exe')) $nativeResource $referenceArgs $sources
+& $csc /nologo /utf8output /platform:x64 /target:winexe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'langswic.exe')) $nativeResource $referenceArgs $sources
 if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }
-& $csc /nologo /utf8output /define:INPUT_TEST /platform:x64 /target:exe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'FastSwitcher.Tests.exe')) $nativeResource $testReferenceArgs $sources
+& $csc /nologo /utf8output /define:INPUT_TEST /platform:x64 /target:exe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'langswic.Tests.exe')) $nativeResource $testReferenceArgs $sources
 if ($LASTEXITCODE -ne 0) { throw 'Test build failed.' }
 if ($CompileOnly) { Write-Output 'Compilation complete; tests and installer were not run.'; exit 0 }
-& (Join-Path $out 'FastSwitcher.Tests.exe') --self-test
+& (Join-Path $out 'langswic.Tests.exe') --self-test
 if ($LASTEXITCODE -ne 0) { throw 'Self-tests failed.' }
-& (Join-Path $out 'FastSwitcher.Tests.exe') --smoke-test
+& (Join-Path $out 'langswic.Tests.exe') --smoke-test
 if ($LASTEXITCODE -ne 0) { throw 'UI smoke-test failed.' }
-& (Join-Path $out 'FastSwitcher.Tests.exe') --input-test
+& (Join-Path $out 'langswic.Tests.exe') --input-test
 if ($LASTEXITCODE -ne 0) { throw 'Input integration test failed.' }
-Copy-Item -LiteralPath (Join-Path $out 'FastSwitcher.exe') -Destination (Join-Path $out 'FastSwitcher-Setup.exe') -Force
-$package = Join-Path $out 'FastSwitcher-Setup.exe'
+Copy-Item -LiteralPath (Join-Path $out 'langswic.exe') -Destination (Join-Path $out 'langswic-Setup.exe') -Force
+$package = Join-Path $out 'langswic-Setup.exe'
 $hash = (Get-FileHash $package -Algorithm SHA256).Hash
-Set-Content -LiteralPath (Join-Path $out 'SHA256SUMS.txt') -Value ($hash + '  FastSwitcher-Setup.exe') -Encoding Ascii
+Set-Content -LiteralPath (Join-Path $out 'SHA256SUMS.txt') -Value ($hash + '  langswic-Setup.exe') -Encoding Ascii
 Get-FileHash $package -Algorithm SHA256 | Format-Table Hash,Path -AutoSize

@@ -143,6 +143,23 @@ internal static class Native {
             return (shift^caps?char.ToUpperInvariant(c):c).ToString();
         }
         if(vk==VK_SPACE)return " ";
+        if(language==0x0409 || language==0x0419){
+            // OEM letter keys must use the same explicit state as A-Z. A
+            // background thread's ToUnicodeEx can miss these queued characters.
+            const string oemKeys="\u00c0\u00db\u00dd\u00ba\u00de\u00bc\u00be\u00bf\u00dc";
+            int index=oemKeys.IndexOf((char)vk);
+            if(index>=0){
+                const string us="`[];',./\\",usShift="~{}:\"<>?|",ru="ёхъжэбю.\\",ruShift="ЁХЪЖЭБЮ,/";
+                char c=(language==0x0419?ru:us)[index];
+                bool caps=(GetKeyState(0x14)&1)!=0;
+                if(language==0x0419 && char.IsLetter(c))return (shift^caps?char.ToUpperInvariant(c):c).ToString();
+                return (shift?(language==0x0419?ruShift:usShift)[index]:c).ToString();
+            }
+            if(vk>=0x30 && vk<=0x39){
+                if(!shift)return ((char)vk).ToString();
+                return (language==0x0419?")!\"№;%:?*(":")!@#$%^&*(")[(int)(vk-0x30)].ToString();
+            }
+        }
         var state=new byte[256];
         if(shift){state[VK_SHIFT]=0x80;state[0xA0]=0x80;state[0xA1]=0x80;}
         if((GetKeyState(0x14)&1)!=0)state[0x14]=1;

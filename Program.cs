@@ -21,44 +21,44 @@ static class Program {
         if(args.Length>0&&(args[0]=="--uninstall"||args[0]=="--uninstall-silent")){Uninstall(args[0].EndsWith("silent"));return 0;}
         if((args.Length>0&&(args[0]=="--setup"||args[0]=="--setup-silent"))||Path.GetFileNameWithoutExtension(Application.ExecutablePath).EndsWith("Setup",StringComparison.OrdinalIgnoreCase)){Install(args.Length>0&&args[0]=="--setup-silent");return 0;}
         bool created;using(var mutex=new Mutex(true,@"Local\FastSwitcher.Desktop.Singleton",out created)){
-            if(!created){MessageBox.Show("Fast Switcher уже запущено. Откройте значок в системном трее.","Fast Switcher");return 0;}
+            if(!created){MessageBox.Show("langswic уже запущено. Откройте значок в системном трее.","langswic");return 0;}
             Application.Run(new MainForm(args.Length>0&&args[0]=="--background"));
         }
         return 0;
     }
-    static string InstallDir(){return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","FastSwitcher");}
-    static string StartMenu(){return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"Fast Switcher.lnk");}
+    static string InstallDir(){return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","langswic");}
+    static string StartMenu(){return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"langswic.lnk");}
     static void Shortcut(string link,string target){
         var type=Type.GetTypeFromProgID("WScript.Shell");var shell=Activator.CreateInstance(type);
         var shortcut=type.InvokeMember("CreateShortcut",BindingFlags.InvokeMethod,null,shell,new object[]{link});
         var t=shortcut.GetType();t.InvokeMember("TargetPath",BindingFlags.SetProperty,null,shortcut,new object[]{target});
         t.InvokeMember("WorkingDirectory",BindingFlags.SetProperty,null,shortcut,new object[]{Path.GetDirectoryName(target)});
-        t.InvokeMember("Description",BindingFlags.SetProperty,null,shortcut,new object[]{"Fast Switcher — локальный переключатель раскладки"});
+        t.InvokeMember("Description",BindingFlags.SetProperty,null,shortcut,new object[]{"langswic — локальный переключатель раскладки"});
         t.InvokeMember("Save",BindingFlags.InvokeMethod,null,shortcut,new object[0]);
     }
     static void Install(bool silent){
         try{
-            string dir=InstallDir(),target=Path.Combine(dir,"FastSwitcher.exe");
-            MigrateLegacySettings();StopInstalledCopy(target);Directory.CreateDirectory(dir);
+            string dir=InstallDir(),target=Path.Combine(dir,"langswic.exe");
+            StopInstalledCopy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","FastSwitcher","FastSwitcher.exe"));MigrateLegacySettings();StopInstalledCopy(target);Directory.CreateDirectory(dir);
             if(!string.Equals(Application.ExecutablePath,target,StringComparison.OrdinalIgnoreCase))File.Copy(Application.ExecutablePath,target,true);
             Shortcut(StartMenu(),target);
-            using(var key=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FastSwitcher")){
-                key.SetValue("DisplayName","Fast Switcher");key.SetValue("DisplayVersion","1.4.2");key.SetValue("Publisher","Личный проект");
+            using(var key=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\langswic")){
+                key.SetValue("DisplayName","langswic");key.SetValue("DisplayVersion","1.5.0");key.SetValue("Publisher","Личный проект");
                 key.SetValue("InstallLocation",dir);key.SetValue("DisplayIcon",target);
                 key.SetValue("UninstallString","\""+target+"\" --uninstall");key.SetValue("NoModify",1,RegistryValueKind.DWord);
             }
-            RemoveLegacyInstall();
+            RemoveLegacyInstall();RemoveFastSwitcherInstall();
             using(var run=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run",true)){
                 if(run!=null){var settings=new SettingsStore().Current;
-                    if(settings.StartWithWindows)run.SetValue("FastSwitcher","\""+target+"\" --background");
-                    else run.DeleteValue("FastSwitcher",false);
+                    if(settings.StartWithWindows)run.SetValue("langswic","\""+target+"\" --background");
+                    else run.DeleteValue("langswic",false);
                 }
             }
-            if(!silent){MessageBox.Show("Fast Switcher установлено. Программа появится в меню «Пуск» и разделе «Приложения» Windows.","Установка завершена");Process.Start(target);}
-        }catch(Exception e){if(silent)throw;MessageBox.Show("Установка не завершена: "+e.Message,"Fast Switcher",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+            if(!silent){MessageBox.Show("langswic установлено. Программа появится в меню «Пуск» и разделе «Приложения» Windows.","Установка завершена");Process.Start(target);}
+        }catch(Exception e){if(silent)throw;MessageBox.Show("Установка не завершена: "+e.Message,"langswic",MessageBoxButtons.OK,MessageBoxIcon.Error);}
     }
     static void StopInstalledCopy(string executable){
-        foreach(var p in Process.GetProcessesByName("FastSwitcher"))try{
+        foreach(var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(executable)))try{
             if(p.Id!=Process.GetCurrentProcess().Id && string.Equals(p.MainModule.FileName,executable,StringComparison.OrdinalIgnoreCase)){p.Kill();p.WaitForExit(3000);}
         }finally{p.Dispose();}
     }
@@ -71,7 +71,7 @@ static class Program {
         }catch{return false;}
     }
     static void MigrateLegacySettings(){
-        string legacy=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Lado","settings.json");
+        string legacy=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"FastSwitcher","settings.json"); if(!File.Exists(legacy))legacy=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Lado","settings.json");
         string current=SettingsStore.PathName;
         if(!File.Exists(legacy))return;
         if(File.Exists(current) && !TestOnlySettings(current))return;
@@ -92,26 +92,38 @@ static class Program {
         using(var run=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run",true))if(run!=null)run.DeleteValue("Lado",false);
         Registry.CurrentUser.DeleteSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\Lado",false);
     }
+    static void RemoveFastSwitcherInstall(){
+        string directory=Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","FastSwitcher"));
+        string executable=Path.Combine(directory,"FastSwitcher.exe");StopInstalledCopy(executable);
+        if(File.Exists(executable))File.Delete(executable);
+        if(Directory.Exists(directory))foreach(string file in Directory.GetFiles(directory,"FastSwitcher.Layout.*.dll")){
+            if(Path.GetDirectoryName(Path.GetFullPath(file))==directory && System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(file),@"^FastSwitcher\.Layout\.[A-F0-9]{64}\.dll$"))try{File.Delete(file);}catch(IOException){}
+        }
+        if(Directory.Exists(directory) && Directory.GetFileSystemEntries(directory).Length==0)Directory.Delete(directory,false);
+        string shortcut=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"Fast Switcher.lnk");if(File.Exists(shortcut))File.Delete(shortcut);
+        using(var run=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run",true))if(run!=null)run.DeleteValue("FastSwitcher",false);
+        Registry.CurrentUser.DeleteSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FastSwitcher",false);
+    }
     static void Uninstall(bool silent){
         try{
-            using(var run=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run",true))if(run!=null)run.DeleteValue("FastSwitcher",false);
-            Registry.CurrentUser.DeleteSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FastSwitcher",false);
+            using(var run=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run",true))if(run!=null)run.DeleteValue("langswic",false);
+            Registry.CurrentUser.DeleteSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\langswic",false);
             if(File.Exists(StartMenu()))File.Delete(StartMenu());
-            string dir=Path.GetFullPath(InstallDir()),exe=Path.Combine(dir,"FastSwitcher.exe");StopInstalledCopy(exe);
-            string script=Path.Combine(Path.GetTempPath(),"FastSwitcher-uninstall-"+Guid.NewGuid().ToString("N")+".ps1");
+            string dir=Path.GetFullPath(InstallDir()),exe=Path.Combine(dir,"langswic.exe");StopInstalledCopy(exe);
+            string script=Path.Combine(Path.GetTempPath(),"langswic-uninstall-"+Guid.NewGuid().ToString("N")+".ps1");
             // Delete only this app's exact files, in one shell with literal paths.
             string cleanup="$fastSwitcherDir = '"+dir.Replace("'","''")+"'\r\n"+
                 "for ($attempt = 0; $attempt -lt 30; $attempt++) {\r\nStart-Sleep -Seconds 1\r\n"+
                 "if (!(Test-Path -LiteralPath $fastSwitcherDir)) { break }\r\n"+
-                "$fastSwitcherFiles = @(Get-ChildItem -LiteralPath $fastSwitcherDir -File | Where-Object { $_.Name -match '^(FastSwitcher\\.exe|FastSwitcher\\.Layout\\.[A-F0-9]{64}\\.dll)$' })\r\n"+
+                "$fastSwitcherFiles = @(Get-ChildItem -LiteralPath $fastSwitcherDir -File | Where-Object { $_.Name -match '^(langswic\\.exe|langswic\\.Layout\\.[A-F0-9]{64}\\.dll)$' })\r\n"+
                 "foreach ($fastSwitcherFile in $fastSwitcherFiles) { if ([IO.Path]::GetFullPath($fastSwitcherFile.DirectoryName) -eq $fastSwitcherDir) { Remove-Item -LiteralPath $fastSwitcherFile.FullName -Force -ErrorAction SilentlyContinue } }\r\n"+
                 "if (@(Get-ChildItem -LiteralPath $fastSwitcherDir -Force).Count -eq 0) { Remove-Item -LiteralPath $fastSwitcherDir -ErrorAction SilentlyContinue; break }\r\n"+
                 "}\r\nRemove-Item -LiteralPath $PSCommandPath -Force\r\n";
             File.WriteAllText(script,cleanup,System.Text.Encoding.UTF8);
             string powershell=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");
             Process.Start(new ProcessStartInfo(powershell,"-NoProfile -ExecutionPolicy Bypass -File \""+script+"\""){CreateNoWindow=true,UseShellExecute=false,WindowStyle=ProcessWindowStyle.Hidden});
-            if(!silent)MessageBox.Show("Fast Switcher удалено. Личные словари и настройки оставлены в %LOCALAPPDATA%\\FastSwitcher.","Удаление завершено");
-        }catch(Exception e){if(silent)throw;MessageBox.Show("Не удалось удалить программу: "+e.Message,"Fast Switcher",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+            if(!silent)MessageBox.Show("langswic удалено. Личные словари и настройки оставлены в %LOCALAPPDATA%\\langswic.","Удаление завершено");
+        }catch(Exception e){if(silent)throw;MessageBox.Show("Не удалось удалить программу: "+e.Message,"langswic",MessageBoxButtons.OK,MessageBoxIcon.Error);}
     }
 }
 static class SelfTest {
@@ -157,6 +169,23 @@ static class SelfTest {
         Check("upper acronym",e.Decide("GHBDTN","",s).Text,"GHBDTN");
         Check("repeated conversion",e.Decide("привет","",s).Text,"привет");
         Check("manual mapping",e.Convert("Ghbdtn"),"Привет");
+        Check("shifted punctuation capital",e.Convert("{hty"),"Хрен");
+        Check("shifted punctuation reverse",e.Convert("Хрен"),"{hty");
+        Check("all shifted letter pairs",e.Convert("~{}:\"<>"),"ЁХЪЖЭБЮ");
+        Check("all shifted pairs reverse",e.Convert("ЁХЪЖЭБЮ"),"~{}:\"<>");
+        Check("punctuation word auto",e.Decide("{hty","",s).Text,"Хрен");
+        Check("internal punctuation auto",e.Decide("j,]trn","",s).Text,"объект");
+        Check("trailing comma preserved",e.Decide("ghbdtn,","",s).Text,"привет,");
+        Check("ordinary English comma preserved",e.Decide("hello,","",s).Text,"hello,");
+        Check("decimal comma",e.Decide("0б5","",s).Text,"0,5");
+        Check("decimal dot",e.Decide("12ю345","",s).Text,"12.345");
+        Check("decimal uppercase separator",e.Decide("120Б50","",s).Text,"120,50");
+        Check("decimal URL preserved",e.Decide("0б5","https://example/",s).Text,"0б5");
+        Check("decimal identifier preserved",e.Decide("id0б5","",s).Text,"id0б5");
+        Check("multiple number separators preserved",e.Decide("1б2б3","",s).Text,"1б2б3");
+        Check("decimal path preserved",e.Decide("0б5",@"C:\temp\",s).Text,"0б5");
+        Check("decimal app exclusion",e.Decide("0б5","",s,new AppRule()).Text,"0б5");
+        Check("typo with comma",e.Decide("teh,","",s).Text,"the,");
         Check("app exclusion",e.Decide("ghbdtn","",s,new AppRule{Process="notepad"}).Text,"ghbdtn");
         s.ExcludedWords.Add("ghbdtn");Check("exclusion",e.Decide("ghbdtn","",s).Text,"ghbdtn");
         s.ExcludedWords.Clear();s.Learned["ghbdtn"]="ghbdtn";Check("learned undo",e.Decide("ghbdtn","",s).Text,"ghbdtn");
@@ -166,12 +195,28 @@ static class SelfTest {
 }
 static class SmokeTest {
     public static int Run(){
+#if INPUT_TEST
+        string directory=Path.Combine(Path.GetTempPath(),"langswic-ui-test-"+Guid.NewGuid().ToString("N"));SettingsStore.TestDirectory=directory;
+#endif
         bool ready=false;var form=new MainForm(true);
         form.Shown+=delegate{var t=new System.Windows.Forms.Timer{Interval=500};t.Tick+=delegate{t.Stop();t.Dispose();ready=form.HookReady&&form.LayoutValid&&form.SmokePages();
-            if(ready){form.Show();form.Activate();Application.DoEvents();using(var bitmap=new System.Drawing.Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new System.Drawing.Rectangle(0,0,form.Width,form.Height));bitmap.Save(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath),"ui-preview.png"));}}
+            if(ready){form.Show();form.Activate();Application.DoEvents();
+#if INPUT_TEST
+                ready=form.SmokeFeatures();
+#endif
+                Capture(form,"ui-preview.png");
+#if INPUT_TEST
+                form.SmokeTheme();ready=ready&&form.SmokePages();Capture(form,"ui-preview-dark.png");
+#endif
+            }
             form.QuitForTests();};t.Start();};
         Application.Run(form);
+#if INPUT_TEST
+        if(Directory.Exists(directory))foreach(string file in Directory.GetFiles(directory))File.Delete(file);
+        if(Directory.Exists(directory))Directory.Delete(directory,false);SettingsStore.TestDirectory=null;
+#endif
         Console.WriteLine(ready?"OK six UI pages, layout and keyboard hook":"FAIL UI pages, layout or keyboard hook");return ready?0:1;
     }
+    static void Capture(Form form,string name){Application.DoEvents();using(var bitmap=new System.Drawing.Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new System.Drawing.Rectangle(0,0,form.Width,form.Height));bitmap.Save(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath),name));}}
 }
 }
