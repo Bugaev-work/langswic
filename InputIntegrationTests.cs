@@ -71,7 +71,7 @@ internal static class InputIntegrationTests {
     public static int Run(bool layoutOnly=false){
         string path=Path.Combine(Path.GetTempPath(),"fast-switcher-input-test-"+Guid.NewGuid().ToString("N")+".txt");
         string dataDir=path+".data";SettingsStore.TestDirectory=dataDir;
-        Process child=null;var host=new MainForm(true);int failed=0;
+        Process child=null;var host=new MainForm(false);int failed=0;
         InputService.AcceptSyntheticInput=true;
         host.Shown+=async delegate{
             try{
@@ -153,6 +153,15 @@ internal static class InputIntegrationTests {
                 if(await WaitFor(path,"объект "))Console.WriteLine("OK comma and right bracket inside a word");else{Console.WriteLine("FAIL internal punctuation: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
                 English(target);await Focus(target);SelectAll();await Task.Delay(150);Shifted(0xC0);Keys(0x4B,0x52,0x46,Native.VK_SPACE);
                 if(await WaitFor(path,"Ёлка "))Console.WriteLine("OK shifted tilde retains capitalized yo");else{Console.WriteLine("FAIL capitalized yo: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Russian(target);Native.PostMessage(target,0x800E,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"привет");await Focus(target);Keys(0x24);await Task.Delay(100);Keys(0x48,0x45,0x4C,0x4C,0x4F);
+                if(await WaitFor(path,"helloпривет") && TargetLanguage(target,0x0409))Console.WriteLine("OK automatic inserted word before existing Russian text");
+                else{Console.WriteLine("FAIL inserted word: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Keys(Native.VK_SPACE);if(!await WaitFor(path,"hello привет")){Console.WriteLine("FAIL inserted word spacing");failed++;}
+                DoubleShift();if(await WaitFor(path,"руддщ привет"))Console.WriteLine("OK inserted word undo preserves following Russian text");else{Console.WriteLine("FAIL inserted word undo: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Russian(target);Native.PostMessage(target,0x800E,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"привет");await Focus(target);Keys(0x24);await Task.Delay(100);Keys(0x48,0x45,0x4C);
+                if(!await WaitFor(path,"рудпривет")){Console.WriteLine("FAIL short insertion setup");failed++;}DoubleShift();
+                if(await WaitFor(path,"helпривет"))Console.WriteLine("OK Double Shift converts tracked insertion before existing letters");else{Console.WriteLine("FAIL manual insertion: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                DoubleShift();if(await WaitFor(path,"рудпривет"))Console.WriteLine("OK manual insertion undo preserves existing letters");else{Console.WriteLine("FAIL manual insertion undo: ["+Read(path)+"]");failed++;}
                 if(layoutOnly)return;
                 Native.PostMessage(target,0x8004,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"привет how are");
                 await Focus(target);DoubleShift();
@@ -264,7 +273,14 @@ internal static class InputIntegrationTests {
                     else{Console.WriteLine("FAIL password conversion");failed++;}
                 }else{Console.WriteLine("FAIL password field setup");failed++;}
                 Native.PostMessage(target,0x800A,IntPtr.Zero,IntPtr.Zero);
-                Russian(target);Native.PostMessage(target,0x8010,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"");await FocusWpf(target);
+                host.ForgetRuleForTest("руддщ");
+                Russian(target);Native.PostMessage(target,0x8016,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"текст привет");await FocusWpf(target);Keys(0x25);Keys(0x27);await Task.Delay(100);Keys(0x48,0x45,0x4C,0x4C,0x4F);
+                if(await WaitFor(path,"текст helloпривет") && TargetLanguage(target,0x0409))Console.WriteLine("OK UIA insertion between existing Russian words");else{Console.WriteLine("FAIL UIA insertion: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                DoubleShift();if(await WaitFor(path,"текст руддщпривет"))Console.WriteLine("OK UIA inserted word undo preserves both neighbours");else{Console.WriteLine("FAIL UIA insertion undo: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Russian(target);Native.PostMessage(target,0x8016,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"текст привет");await FocusWpf(target);Keys(0x25);Keys(0x27);await Task.Delay(100);Keys(0x48,0x45,0x4C);
+                await WaitFor(path,"текст рудпривет");DoubleShift();
+                if(await WaitFor(path,"текст helпривет"))Console.WriteLine("OK UIA Double Shift converts only the newly inserted prefix");else{Console.WriteLine("FAIL UIA manual insertion: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
+                Russian(target);Native.PostMessage(target,0x8010,IntPtr.Zero,IntPtr.Zero);await WaitFor(path,"");await FocusWpf(target);Keys(0x24);await Task.Delay(100);
                 Keys(0x30,0xBC,0x35);
                 if(await WaitFor(path,"0,5"))Console.WriteLine("OK numeric correction through UI Automation");
                 else{Console.WriteLine("FAIL UIA decimal: ["+Read(path)+"] "+host.InputDiagnostic);failed++;}
@@ -343,6 +359,7 @@ internal static class InputIntegrationTests {
             if(m.Msg==0x8002){var h=Native.LoadKeyboardLayout("00000419",1);if(h!=IntPtr.Zero)Native.ActivateKeyboardLayout(h,0);}
             if(m.Msg==0x8003){Activate();if(Box!=null)Box.Focus();}
             if(m.Msg==0x800D)SetFocus(IntPtr.Zero);
+            if(m.Msg==0x800E && Box!=null){Box.Text="привет";Box.SelectionStart=0;Box.SelectionLength=0;}
             if(m.Msg==0x800B){((IgnoringLayoutTextBox)Box).DelayCharacters=true;}
             if(m.Msg==0x800C){((IgnoringLayoutTextBox)Box).DelayCharacters=false;}
             if(m.Msg==0x8004 && Box!=null){Box.Text="привет how are";Box.SelectionStart=Box.TextLength;Box.SelectionLength=0;}
@@ -358,6 +375,7 @@ internal static class InputIntegrationTests {
             if(m.Msg==0x8013 && WpfBox!=null){WpfBox.Text="привет how are";WpfBox.Focus();System.Windows.Input.Keyboard.Focus(WpfBox);WpfBox.SelectAll();}
             if(m.Msg==0x8014 && WpfBox!=null){WpfBox.Text="привет how are";WpfBox.Focus();System.Windows.Input.Keyboard.Focus(WpfBox);WpfBox.Select(7,3);}
             if(m.Msg==0x8015 && WpfBox!=null){WpfBox.Text="ghbdtn ghbdtn";WpfBox.Focus();System.Windows.Input.Keyboard.Focus(WpfBox);WpfBox.Select(6,0);}
+            if(m.Msg==0x8016 && WpfBox!=null){WpfBox.Text="текст привет";WpfBox.Focus();System.Windows.Input.Keyboard.Focus(WpfBox);WpfBox.Select(6,0);}
             if(m.Msg==0x8020 && RichBox!=null){RichBox.Document.Blocks.Clear();RichBox.Document.Blocks.Add(new System.Windows.Documents.Paragraph());RichBox.Focus();System.Windows.Input.Keyboard.Focus(RichBox);}
             if(m.Msg==0x8021 && RichBox!=null){
                 var first=new System.Windows.Documents.Run("KEEP "){FontWeight=System.Windows.FontWeights.Bold};

@@ -10,6 +10,7 @@ using Microsoft.Win32;
 namespace FastSwitcher {
 static class Program {
     [STAThread] static int Main(string[] args){
+        TaskbarIdentity.Initialize();
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
         if(args.Length>0&&args[0]=="--self-test")return SelfTest.Run();
         if(args.Length>0&&args[0]=="--smoke-test")return SmokeTest.Run();
@@ -28,13 +29,15 @@ static class Program {
     }
     static string InstallDir(){return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","langswic");}
     static string StartMenu(){return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),"langswic.lnk");}
-    static void Shortcut(string link,string target){
+    internal static void Shortcut(string link,string target){
         var type=Type.GetTypeFromProgID("WScript.Shell");var shell=Activator.CreateInstance(type);
         var shortcut=type.InvokeMember("CreateShortcut",BindingFlags.InvokeMethod,null,shell,new object[]{link});
         var t=shortcut.GetType();t.InvokeMember("TargetPath",BindingFlags.SetProperty,null,shortcut,new object[]{target});
         t.InvokeMember("WorkingDirectory",BindingFlags.SetProperty,null,shortcut,new object[]{Path.GetDirectoryName(target)});
         t.InvokeMember("Description",BindingFlags.SetProperty,null,shortcut,new object[]{"langswic — локальный переключатель раскладки"});
+        t.InvokeMember("IconLocation",BindingFlags.SetProperty,null,shortcut,new object[]{target+",0"});
         t.InvokeMember("Save",BindingFlags.InvokeMethod,null,shortcut,new object[0]);
+        TaskbarIdentity.SetShortcutId(link);
     }
     static void Install(bool silent){
         try{
@@ -43,11 +46,12 @@ static class Program {
             if(!string.Equals(Application.ExecutablePath,target,StringComparison.OrdinalIgnoreCase))File.Copy(Application.ExecutablePath,target,true);
             Shortcut(StartMenu(),target);
             using(var key=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\langswic")){
-                key.SetValue("DisplayName","langswic");key.SetValue("DisplayVersion","1.5.1");key.SetValue("Publisher","Личный проект");
+                key.SetValue("DisplayName","langswic");key.SetValue("DisplayVersion","1.5.2");key.SetValue("Publisher","Личный проект");
                 key.SetValue("InstallLocation",dir);key.SetValue("DisplayIcon",target);
                 key.SetValue("UninstallString","\""+target+"\" --uninstall");key.SetValue("NoModify",1,RegistryValueKind.DWord);
             }
             RemoveLegacyInstall();RemoveFastSwitcherInstall();
+            TaskbarIdentity.RefreshIcons();
             using(var run=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run",true)){
                 if(run!=null){var settings=new SettingsStore().Current;
                     if(settings.StartWithWindows)run.SetValue("langswic","\""+target+"\" --background");
@@ -197,16 +201,18 @@ static class SmokeTest {
     public static int Run(){
 #if INPUT_TEST
         string directory=Path.Combine(Path.GetTempPath(),"langswic-ui-test-"+Guid.NewGuid().ToString("N"));SettingsStore.TestDirectory=directory;
+        Directory.CreateDirectory(directory);string shortcut=Path.Combine(directory,"langswic.lnk");Program.Shortcut(shortcut,Application.ExecutablePath);
+        if(TaskbarIdentity.ShortcutId(shortcut)!="Langswic.Desktop")throw new InvalidOperationException("Shortcut AppUserModelID was not retained.");
 #endif
         bool ready=false;var form=new MainForm(true);
-        form.Shown+=delegate{var t=new System.Windows.Forms.Timer{Interval=500};t.Tick+=delegate{t.Stop();t.Dispose();ready=form.HookReady&&form.LayoutValid&&form.SmokePages();
+        form.Shown+=delegate{var t=new System.Windows.Forms.Timer{Interval=500};t.Tick+=delegate{t.Stop();t.Dispose();form.Show();form.Activate();Application.DoEvents();ready=form.HookReady&&form.LayoutValid&&form.SmokePages();
             if(ready){form.Show();form.Activate();Application.DoEvents();
 #if INPUT_TEST
-                ready=form.SmokeFeatures();
+                ready=form.SmokeFeatures()&&form.SmokeTray();
 #endif
                 Capture(form,"ui-preview.png");
 #if INPUT_TEST
-                form.SmokeTheme();ready=ready&&form.SmokePages();Capture(form,"ui-preview-dark.png");
+                form.SmokeTheme();ready=ready&&form.SmokePages()&&form.SmokeTray();Capture(form,"ui-preview-dark.png");
 #endif
             }
             form.QuitForTests();};t.Start();};
@@ -215,7 +221,7 @@ static class SmokeTest {
         if(Directory.Exists(directory))foreach(string file in Directory.GetFiles(directory))File.Delete(file);
         if(Directory.Exists(directory))Directory.Delete(directory,false);SettingsStore.TestDirectory=null;
 #endif
-        Console.WriteLine(ready?"OK six UI pages, layout and keyboard hook":"FAIL UI pages, layout or keyboard hook");return ready?0:1;
+        Console.WriteLine(ready?"OK five UI pages and ten sections without page scrolling, layout and keyboard hook":"FAIL UI pages, clipping, layout or keyboard hook");return ready?0:1;
     }
     static void Capture(Form form,string name){Application.DoEvents();using(var bitmap=new System.Drawing.Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new System.Drawing.Rectangle(0,0,form.Width,form.Height));bitmap.Save(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath),name));}}
 }

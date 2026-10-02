@@ -412,15 +412,22 @@ public sealed class InputService : IDisposable {
     }
     bool ReadWordAtCaret(IntPtr focus,out string source,out string delimiter,bool includeTrailingSymbols=false){
         source="";delimiter="";Native.EditSnapshot edit;
-        if(Native.TryGetEditSnapshot(focus,out edit))
-            return edit.Start==edit.End && (edit.Start==edit.Text.Length || !LanguageEngine.TokenCharacter(edit.Text[edit.Start]))
-                && SplitCaretWord(edit.Text.Substring(0,edit.Start),out source,out delimiter,includeTrailingSymbols);
+        if(Native.TryGetEditSnapshot(focus,out edit)){
+            if(edit.Start!=edit.End || !SplitCaretWord(edit.Text.Substring(0,edit.Start),out source,out delimiter,includeTrailingSymbols))return false;
+            return CaretBoundary(edit.Text,edit.Start,source,delimiter);
+        }
         try{
             TextAccess.Snapshot snapshot;
             if(!TextAccess.Read(TextAccess.FocusedEditable(),out snapshot) || snapshot.Start!=snapshot.End)return false;
-            if(snapshot.Start<snapshot.All.Length && LanguageEngine.TokenCharacter(snapshot.All[snapshot.Start]))return false;
-            return SplitCaretWord(snapshot.All.Substring(0,snapshot.Start),out source,out delimiter,includeTrailingSymbols);
+            if(!SplitCaretWord(snapshot.All.Substring(0,snapshot.Start),out source,out delimiter,includeTrailingSymbols))return false;
+            return CaretBoundary(snapshot.All,snapshot.Start,source,delimiter);
         }catch{return false;}
+    }
+    bool CaretBoundary(string text,int caret,string source,string delimiter){
+        if(caret==text.Length || !LanguageEngine.TokenCharacter(text[caret]) || delimiter.Length>0)return true;
+        // Permit a newly tracked insertion immediately before existing text.
+        // A navigated caret inside an old word has no such tracked prefix.
+        return source.Length>0 && source==word;
     }
     public void ManualOrUndo(){Post(()=>AfterModifiers(ManualOrUndoCore));}
     void ManualOrUndoCore(){
@@ -495,7 +502,7 @@ public sealed class InputService : IDisposable {
         if(restored){
             if(a.Kind==ChangeKind.Layout && a.NativeSelection)SetTextLayout(w,a.Before);
             if(a.Kind!=ChangeKind.Learned && !a.Selection && a.Before.Length<=40 && a.Before.All(char.IsLetter))Remember(a.Before,a.Before);
-            word="";lastWord=a.Selection?"":a.Before;lastDelimiter=a.Selection?"":a.Delimiter;
+            word=!a.Selection && a.Delimiter.Length==0?a.Before:"";lastWord=a.Selection?"":a.Before;lastDelimiter=a.Selection?"":a.Delimiter;
             lastAction=null;LastReason="Последнее исправление отменено";Notify();return true;
         }
         return false;
