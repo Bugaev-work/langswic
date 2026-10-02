@@ -38,7 +38,7 @@ internal sealed class FeatureTile : CheckBox {
         int sx=(Width-40)/2,sy=196;
         using(var path=Round(new Rectangle(sx,sy,40,22),11))using(var brush=new SolidBrush(Checked?Accent:Color.FromArgb(161,169,185)))g.FillPath(brush,path);
         using(var brush=new SolidBrush(Color.White))g.FillEllipse(brush,sx+(Checked?21:3),sy+3,16,16);
-        if(Focused)ControlPaint.DrawFocusRectangle(g,new Rectangle(6,3,Width-12,Height-6),Ink,BackColor);
+        if(Focused&&FocusAppearance.Keyboard)using(var brush=new SolidBrush(Accent))g.FillEllipse(brush,Width/2-3,3,6,6);
     }
     static void Star(Graphics g,Color color,int x,int y,int size){var points=new[]{new Point(x,y-size),new Point(x+5,y-5),new Point(x+size,y),new Point(x+5,y+5),new Point(x,y+size),new Point(x-5,y+5),new Point(x-size,y),new Point(x-5,y-5)};using(var brush=new SolidBrush(color))g.FillPolygon(brush,points);}
     static GraphicsPath Round(Rectangle r,int radius){var path=new GraphicsPath();int d=radius*2;path.AddArc(r.X,r.Y,d,d,180,90);path.AddArc(r.Right-d,r.Y,d,d,270,90);path.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);path.AddArc(r.X,r.Bottom-d,d,d,90,90);path.CloseFigure();return path;}

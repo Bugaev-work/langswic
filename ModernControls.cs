@@ -5,6 +5,18 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace FastSwitcher {
+internal sealed class FocusAppearance : IMessageFilter {
+    static bool installed;
+    public static bool Keyboard {get;private set;}
+    public static void Install(){if(installed)return;installed=true;Application.AddMessageFilter(new FocusAppearance());}
+    public bool PreFilterMessage(ref Message message){
+        bool keyboard=Keyboard;
+        if(message.Msg==0x100||message.Msg==0x104)keyboard=true;
+        else if(message.Msg==0x201||message.Msg==0x204||message.Msg==0x207||message.Msg==0x20b)keyboard=false;
+        if(keyboard!=Keyboard){Keyboard=keyboard;foreach(Form form in Application.OpenForms)form.Invalidate(true);}
+        return false;
+    }
+}
 internal static class ControlShape {
     public static GraphicsPath Round(Rectangle r,int radius){var p=new GraphicsPath();int d=Math.Min(radius*2,Math.Min(r.Width,r.Height));p.AddArc(r.X,r.Y,d,d,180,90);p.AddArc(r.Right-d,r.Y,d,d,270,90);p.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);p.AddArc(r.X,r.Bottom-d,d,d,90,90);p.CloseFigure();return p;}
     public static void Switch(Graphics g,Rectangle r,bool value,Color accent,Color off){
@@ -64,9 +76,6 @@ internal sealed class ScrollRail : Control {
 internal sealed class StyledList : ListBox {
     protected override CreateParams CreateParams {get{var p=base.CreateParams;p.Style&=~0x200000;return p;}}
 }
-internal sealed class SwitchCell : DataGridViewCheckBoxCell {
-    protected override Rectangle GetContentBounds(Graphics graphics,DataGridViewCellStyle style,int rowIndex){var size=GetSize(rowIndex);return new Rectangle((size.Width-34)/2,(size.Height-20)/2,34,20);}
-}
 internal sealed class SwitchRow : CheckBox {
     public Color Accent,Muted;
     public SwitchRow(){SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);Cursor=Cursors.Hand;AccessibleRole=AccessibleRole.CheckButton;}
@@ -74,7 +83,7 @@ internal sealed class SwitchRow : CheckBox {
         var g=e.Graphics;g.Clear(BackColor);g.SmoothingMode=SmoothingMode.AntiAlias;
         TextRenderer.DrawText(g,Text,Font,new Rectangle(2,0,Width-68,Height),ForeColor,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);
         ControlShape.Switch(g,new Rectangle(Width-47,(Height-24)/2,44,24),Checked,Accent,Muted);
-        if(Focused)using(var p=ControlShape.Round(new Rectangle(0,0,Width-1,Height-1),6))using(var pen=new Pen(Accent))g.DrawPath(pen,p);
+        if(Focused&&FocusAppearance.Keyboard)using(var pen=new Pen(Accent,2))g.DrawLine(pen,2,Height-3,26,Height-3);
     }
 }
 internal sealed class SegmentButton : RadioButton {
@@ -83,9 +92,10 @@ internal sealed class SegmentButton : RadioButton {
     protected override void OnPaint(PaintEventArgs e){
         var g=e.Graphics;g.Clear(Parent.BackColor);g.SmoothingMode=SmoothingMode.AntiAlias;
         using(var p=ControlShape.Round(new Rectangle(1,1,Width-3,Height-3),10)){
-            using(var b=new SolidBrush(Checked?ActiveSurface:Surface))g.FillPath(b,p);using(var pen=new Pen(Focused?Accent:Outline))g.DrawPath(pen,p);
+            using(var b=new SolidBrush(Checked?ActiveSurface:Surface))g.FillPath(b,p);
         }
         TextRenderer.DrawText(g,Text,Font,ClientRectangle,Checked?Accent:ForeColor,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);
+        if(Focused&&FocusAppearance.Keyboard)using(var pen=new Pen(Accent,2))g.DrawLine(pen,Width/2-12,Height-5,Width/2+12,Height-5);
     }
 }
 }

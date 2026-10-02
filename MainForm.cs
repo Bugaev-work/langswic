@@ -1,6 +1,5 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
@@ -37,7 +36,7 @@ sealed class PillButton : Button {
             using(var brush=new SolidBrush(hover?(BackColor.B>150&&BackColor.R<80?Color.FromArgb(30,96,211):BackColor.GetBrightness()>.6?Color.FromArgb(221,233,252):Color.FromArgb(36,48,67)):BackColor))e.Graphics.FillPath(brush,p);
         }
         TextRenderer.DrawText(e.Graphics,Text,Font,r,ForeColor,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
-        if(Focused)ControlPaint.DrawFocusRectangle(e.Graphics,new Rectangle(7,5,Width-14,Height-10),ForeColor,BackColor);
+        if(Focused&&FocusAppearance.Keyboard){using(var pen=new Pen(ForeColor,2))e.Graphics.DrawLine(pen,Width/2-12,Height-5,Width/2+12,Height-5);}
     }
 }
 public sealed class MainForm : Form {
@@ -47,7 +46,7 @@ public sealed class MainForm : Form {
     Panel sidebar,content; Label title; FeatureTile autoTile,shiftTile,smartTile; NotifyIcon tray; ContextMenuStrip trayMenu;
     readonly List<Button> nav=new List<Button>();
     bool updatingTiles;
-    int settingsSection,exceptionSection,dictionarySection,hotkeySection;
+    int settingsSection,exceptionSection,hotkeySection;
     ToolStripMenuItem trayStatus,trayAutomatic,trayStartup;
     readonly Dictionary<int,string> hotkeyErrors=new Dictionary<int,string>();
     Timer diagnosticTimer; bool exiting=false; int page=0;
@@ -76,10 +75,14 @@ public sealed class MainForm : Form {
         Descendants(content).OfType<PillButton>().First().Focus();Application.DoEvents();ok=ok&&store.Current.LayoutSoundFile==field.Text;
         field.Text=old;store.Current.LayoutSoundFile=old;store.Save();
         exceptionSection=0;ShowPage(2);field=Descendants(content).OfType<RoundedField>().First();old=field.Text;field.Text=string.Join(Environment.NewLine,Enumerable.Range(0,80).Select(i=>"слово"+i).ToArray());field.Editor.Select(0,0);field.ScrollToForTest(30);ok=ok&&field.ScrollPosition>0&&field.Editor.SelectionStart==0;field.Text=old;
-        exceptionSection=1;ShowPage(2);var grid=Descendants(content).OfType<DataGridView>().First();var rail=Descendants(content).OfType<ScrollRail>().First();rail.ScrollTo(4);ok=ok&&grid.FirstDisplayedScrollingRowIndex>0&&grid.Columns[0].HeaderText=="Процесс";
-        var savedRules=new Dictionary<string,string>(store.Current.Learned);store.Current.Learned.Clear();for(int i=0;i<30;i++)store.Current.Learned.Add("пример"+i,"example"+i);
-        dictionarySection=1;ShowPage(3);var list=Descendants(content).OfType<StyledList>().First();list.SelectedIndex=1;rail=Descendants(content).OfType<ScrollRail>().First();rail.ScrollTo(12);ok=ok&&list.TopIndex==12&&list.SelectedIndex==1;
-        store.Current.Learned=savedRules;store.Save();settingsSection=exceptionSection=dictionarySection=0;ShowPage(0);Console.WriteLine(ok?"OK custom switches, accessible categories, field selection/save and text/table/list scrolling":"FAIL custom control interaction");return ok;
+        int originalCount=store.Current.Apps.Count;var added=AddAppExecutable(Application.ExecutablePath);ok=ok&&!added.Layout&&!added.Typos&&!added.Yo&&store.Current.Apps.Count==originalCount+1;
+        var duplicate=AddAppExecutable(Application.ExecutablePath.ToUpperInvariant());ok=ok&&object.ReferenceEquals(added,duplicate)&&store.Current.Apps.Count==originalCount+1;
+        bool rejected=false;try{AddAppExecutable(SettingsStore.PathName);}catch(ArgumentException){rejected=true;}ok=ok&&rejected&&store.Current.Apps.Count==originalCount+1;
+        exceptionSection=1;ShowPage(2);var list=Descendants(content).OfType<StyledList>().First();list.SelectedItem=added;var rail=Descendants(content).OfType<ScrollRail>().First();rail.ScrollTo(4);ok=ok&&list.TopIndex>0&&object.ReferenceEquals(list.SelectedItem,added)&&!Descendants(content).OfType<DataGridView>().Any();
+        var appToggle=Descendants(content).OfType<SwitchRow>().First();appToggle.AccessibilityObject.DoDefaultAction();var persisted=store.Load(SettingsStore.PathName).Apps.First(a=>a.Process==added.Process);ok=ok&&persisted.Layout&&persisted.ExecutablePath==added.ExecutablePath;
+        var clickMode=new FocusAppearance();var keyboardMessage=Message.Create(Handle,0x100,new IntPtr((int)Keys.Tab),IntPtr.Zero);clickMode.PreFilterMessage(ref keyboardMessage);ok=ok&&FocusAppearance.Keyboard;var mouseMessage=Message.Create(Handle,0x201,IntPtr.Zero,IntPtr.Zero);clickMode.PreFilterMessage(ref mouseMessage);ok=ok&&!FocusAppearance.Keyboard;
+        Descendants(content).OfType<PillButton>().First(b=>b.Text=="Удалить исключение").PerformClick();ok=ok&&store.Current.Apps.Count==originalCount&&!store.Load(SettingsStore.PathName).Apps.Any(a=>a.Process==added.Process);
+        ok=ok&&nav.Count==4&&!nav.Any(b=>b.Text=="Словари");settingsSection=exceptionSection=0;ShowPage(0);Console.WriteLine(ok?"OK custom controls, EXE add/deduplication/rejection, per-app persistence/removal and pointer focus":"FAIL custom control interaction");return ok;
     }
     internal System.Threading.Tasks.Task DelayInputWorkerForTest(int ms){return input.DelayWorkerForTest(ms);}
     internal void ForgetRuleForTest(string word){store.Current.Learned.Remove(word);}
@@ -87,9 +90,9 @@ public sealed class MainForm : Form {
 #endif
     public bool LayoutValid {get{return sidebar!=null&&content!=null&&content.Top>=sidebar.Bottom&&content.Width>500;}}
     public bool SmokePages(){
-        int[] counts={1,3,2,2,2};bool valid=true;
-        for(int i=0;i<5;i++)for(int j=0;j<counts[i];j++){
-            if(i==1)settingsSection=j;if(i==2)exceptionSection=j;if(i==3)dictionarySection=j;if(i==4)hotkeySection=j;
+        int[] counts={1,3,2,2};bool valid=true;
+        for(int i=0;i<4;i++)for(int j=0;j<counts[i];j++){
+            if(i==1)settingsSection=j;if(i==2)exceptionSection=j;if(i==3)hotkeySection=j;
             ShowPage(i);Application.DoEvents();
             if(content.Controls.Count==0 || content.Controls[0].Height<100 || content.Controls[0].Bottom>content.ClientSize.Height || content.Controls[0].Right>content.ClientSize.Width){valid=false;
 #if INPUT_TEST
@@ -100,11 +103,11 @@ public sealed class MainForm : Form {
             using(var bitmap=new Bitmap(Width,Height)){DrawToBitmap(bitmap,new Rectangle(0,0,Width,Height));bitmap.Save(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath),"ui-page-"+i+"-"+j+(store.Current.DarkTheme?"-dark":"")+".png"));}
 #endif
         }
-        settingsSection=exceptionSection=dictionarySection=hotkeySection=0;ShowPage(0);return valid;
+        settingsSection=exceptionSection=hotkeySection=0;ShowPage(0);return valid;
     }
     public void QuitForTests(){exiting=true;Close();}
     public MainForm(bool background){
-        Text="langswic"; Width=1000;Height=740;FormBorderStyle=FormBorderStyle.FixedSingle;MaximizeBox=false;ShowInTaskbar=true;ShowIcon=true;
+        FocusAppearance.Install();Text="langswic"; Width=1000;Height=740;FormBorderStyle=FormBorderStyle.FixedSingle;MaximizeBox=false;ShowInTaskbar=true;ShowIcon=true;
         StartPosition=FormStartPosition.CenterScreen; Font=new Font("Segoe UI",10);
         Icon=MakeIcon();
         engine.AddUserWords(store.Current);
@@ -126,12 +129,12 @@ public sealed class MainForm : Form {
     }
     void MakeShell(){
         content=new Panel{Dock=DockStyle.Fill,AutoScroll=false};Controls.Add(content);
-        var navigation=new TableLayoutPanel{Dock=DockStyle.Top,Height=48,Padding=new Padding(24,4,24,4),ColumnCount=5,RowCount=1};sidebar=navigation;Controls.Add(sidebar);
-        string[] names={"Обзор","Настройки","Исключения","Словари","Горячие клавиши"};
-        for(int i=0;i<names.Length;i++){navigation.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));int index=i;var b=new PillButton{Text=names[i],Dock=DockStyle.Fill,FlatStyle=FlatStyle.Flat,TabIndex=i,Font=new Font("Segoe UI Semibold",10),Margin=new Padding(2,0,2,0)};b.FlatAppearance.BorderSize=0;b.Click+=delegate{ShowPage(index);};navigation.Controls.Add(b,i,0);nav.Add(b);}
+        var navigation=new TableLayoutPanel{Dock=DockStyle.Top,Height=48,Padding=new Padding(24,4,24,4),ColumnCount=4,RowCount=1};sidebar=navigation;Controls.Add(sidebar);
+        string[] names={"Обзор","Настройки","Исключения","Горячие клавиши"};
+        for(int i=0;i<names.Length;i++){navigation.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));int index=i;var b=new PillButton{Text=names[i],Dock=DockStyle.Fill,FlatStyle=FlatStyle.Flat,TabIndex=i,Font=new Font("Segoe UI Semibold",10),Margin=new Padding(2,0,2,0)};b.FlatAppearance.BorderSize=0;b.Click+=delegate{ShowPage(index);};navigation.Controls.Add(b,i,0);nav.Add(b);}
         Controls.Add(new BlueHeader{Dock=DockStyle.Top,Height=128});
         var footer=new Panel{Dock=DockStyle.Bottom,Height=36,Padding=new Padding(22,0,20,0)};
-        footer.Controls.Add(new Label{Text="v. 1.5.3   ·   Локальная обработка",Dock=DockStyle.Left,Width=400,TextAlign=ContentAlignment.MiddleLeft});
+        footer.Controls.Add(new Label{Text="v. 1.5.4   ·   Локальная обработка",Dock=DockStyle.Left,Width=400,TextAlign=ContentAlignment.MiddleLeft});
         var theme=new PillButton{Text="Сменить тему",Dock=DockStyle.Right,Width=135,FlatStyle=FlatStyle.Flat};theme.FlatAppearance.BorderSize=0;theme.Click+=delegate{ChangeTheme();};footer.Controls.Add(theme);Controls.Add(footer);
         trayMenu=new ContextMenuStrip{Font=new Font("Segoe UI",10),Padding=new Padding(5,7,5,7),ShowImageMargin=false,ShowCheckMargin=true};
         trayStatus=new ToolStripMenuItem("langswic · локальная обработка"){Enabled=false};trayMenu.Items.Add(trayStatus);
@@ -165,9 +168,9 @@ public sealed class MainForm : Form {
         foreach(var b in nav){b.BackColor=nav.IndexOf(b)==index?activeNav:side;b.ForeColor=nav.IndexOf(b)==index?textAccent:ink;}
         var host=new FlowLayoutPanel{FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,Width=Math.Max(500,content.ClientSize.Width-48),Location=new Point(24,16),Padding=new Padding(0),Margin=new Padding(0)};
         content.Controls.Add(host);
-        string[] names={"Обзор","Настройки","Исключения","Словари","Горячие клавиши"};
+        string[] names={"Обзор","Настройки","Исключения","Горячие клавиши"};
         title=TextLabel(names[index],24,FontStyle.Bold,46);if(index!=0)host.Controls.Add(title);else title.Visible=false;
-        switch(index){case 0:Overview(host);break;case 1:SettingsPage(host);break;case 2:ExceptionsPage(host);break;case 3:DictionariesPage(host);break;case 4:HotkeysPage(host);break;}
+        switch(index){case 0:Overview(host);break;case 1:SettingsPage(host);break;case 2:ExceptionsPage(host);break;case 3:HotkeysPage(host);break;}
         content.ResumeLayout();UpdateStatus();
     }
     Label TextLabel(string text,int size,FontStyle style,int height){return new Label{Text=text,Font=new Font("Segoe UI",size,style),ForeColor=ink,Height=height,Width=Math.Max(480,content.ClientSize.Width-70),TextAlign=ContentAlignment.MiddleLeft,Margin=new Padding(0,0,0,5)};}
@@ -233,44 +236,59 @@ public sealed class MainForm : Form {
     FlowLayoutPanel SoundPicker(string caption,string value,Action<string> set){var r=Row();var box=Field(value,520,40,false,caption);r.Controls.Add(box);r.Controls.Add(ActionButton("Выбрать WAV",delegate{using(var d=new System.Windows.Forms.OpenFileDialog{Filter="WAV (*.wav)|*.wav"})if(d.ShowDialog()==DialogResult.OK){box.Text=d.FileName;set(box.Text);store.Save();}},135));box.Leave+=delegate{set(box.Text);store.Save();};return r;}
     void ExceptionsPage(FlowLayoutPanel host){
         SectionPicker(host,new[]{"Слова","Приложения"},exceptionSection,v=>exceptionSection=v);
-        FlowLayoutPanel c;if(exceptionSection==0){
-        c=Card(host,"Слова-исключения","Эти слова автоматика оставляет без изменений. По одному слову в строке.");
-        var words=Field(string.Join(Environment.NewLine,store.Current.ExcludedWords.ToArray()),c.Width-8,120,true,"Слова-исключения");words.ScrollBars=ScrollBars.Vertical;c.Controls.Add(words);
-        c.Controls.Add(ActionButton("Сохранить слова",delegate{store.Current.ExcludedWords=Lines(words.Text);store.Save();},165));
-        return;}
-        c=Card(host,"Правила для приложений","Укажите имя процесса без .exe. Снимите все три флажка для полного отключения автоматики.");
-        var binding=new BindingList<AppRule>(store.Current.Apps.Select(a=>new AppRule{Process=a.Process,Layout=a.Layout,Typos=a.Typos,Yo=a.Yo}).ToList());
-        var grid=new DataGridView{Width=c.Width-8,Height=204,AutoGenerateColumns=false,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,RowHeadersVisible=false,AllowUserToAddRows=true,BackgroundColor=card,ForeColor=ink,ScrollBars=ScrollBars.None};
-        grid.Columns.Add(new DataGridViewTextBoxColumn{DataPropertyName="Process",HeaderText="Процесс",FillWeight=40});
-        string[] properties={"Layout","Typos","Yo"},headers={"Раскладка","Опечатки","Ё"};for(int i=0;i<3;i++)grid.Columns.Add(new DataGridViewCheckBoxColumn{DataPropertyName=properties[i],HeaderText=headers[i],CellTemplate=new SwitchCell(),FillWeight=20});
-        grid.DataSource=binding;
-        StyleGrid(grid);
-        if(grid.Columns.Count>=4){grid.Columns[0].HeaderText="Процесс";grid.Columns[1].HeaderText="Раскладка";grid.Columns[2].HeaderText="Опечатки";grid.Columns[3].HeaderText="Ё";}
-        var gridScroll=new ScrollRail(()=>grid.FirstDisplayedScrollingRowIndex,()=>grid.Rows.Count,()=>grid.DisplayedRowCount(false),line=>{if(grid.Rows.Count>0)grid.FirstDisplayedScrollingRowIndex=Math.Min(grid.Rows.Count-1,line);}){BackColor=card,ForeColor=muted};
-        grid.Scroll+=delegate{gridScroll.Invalidate();};grid.SelectionChanged+=delegate{gridScroll.Invalidate();};c.Controls.Add(ScrollContainer(grid,gridScroll,c.Width-8,204));
-        c.Controls.Add(ActionButton("Сохранить правила",delegate{grid.EndEdit();store.Current.Apps=binding.Where(a=>!string.IsNullOrWhiteSpace(a.Process)).Select(a=>new AppRule{Process=a.Process.Trim().Replace(".exe","").ToLowerInvariant(),Layout=a.Layout,Typos=a.Typos,Yo=a.Yo}).ToList();store.Save();MessageBox.Show("Правила сохранены.","langswic");},165));
+        if(exceptionSection==0){
+            var wordsCard=Card(host,"Слова-исключения","Эти слова автоматика оставляет без изменений. По одному слову в строке.");
+            var words=Field(string.Join(Environment.NewLine,store.Current.ExcludedWords.ToArray()),wordsCard.Width-8,120,true,"Слова-исключения");words.ScrollBars=ScrollBars.Vertical;wordsCard.Controls.Add(words);
+            wordsCard.Controls.Add(ActionButton("Сохранить слова",delegate{store.Current.ExcludedWords=Lines(words.Text);store.Save();},165));return;
+        }
+        var c=Card(host,"Приложения-исключения","Выберите EXE — автоматика для программы отключится. Можно разрешить отдельные виды исправлений.");
+        var commands=Row();c.Controls.Add(commands);
+        var columns=new TableLayoutPanel{Width=c.Width-8,Height=190,ColumnCount=2,RowCount=1,Margin=new Padding(0,3,0,3)};
+        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,35));columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,65));
+        var list=MakeList("Приложения-исключения");
+        var rail=new ScrollRail(()=>list.TopIndex,()=>list.Items.Count,()=>list.Height/list.ItemHeight,line=>{if(list.Items.Count>0)list.TopIndex=line;}){BackColor=side,ForeColor=muted};
+        list.SelectedIndexChanged+=delegate{rail.Invalidate();};list.KeyUp+=delegate{rail.Invalidate();};list.MouseWheel+=delegate{if(list.IsHandleCreated)list.BeginInvoke((Action)(()=>rail.Invalidate()));};
+        var listPanel=ScrollContainer(list,rail,310,190);listPanel.Dock=DockStyle.Fill;columns.Controls.Add(listPanel,0,0);
+        var details=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(16,0,0,0),Margin=new Padding(0)};columns.Controls.Add(details,1,0);c.Controls.Add(columns);
+        Button remove=null;
+        Action render=delegate{
+            foreach(Control old in details.Controls.Cast<Control>().ToArray())old.Dispose();details.Controls.Clear();
+            var rule=list.SelectedItem as AppRule;remove.Enabled=rule!=null;
+            if(rule==null){details.Controls.Add(new Label{Text="Добавьте программу через выбор EXE.",ForeColor=muted,Width=500,Height=40});return;}
+            int width=Math.Max(400,columns.Width*65/100-28);
+            details.Controls.Add(new Label{Text=rule.Process+".exe",ForeColor=ink,Font=new Font("Segoe UI Semibold",12),Width=width,Height=26,Margin=new Padding(0)});
+            string path=string.IsNullOrWhiteSpace(rule.ExecutablePath)?"Правило для всех процессов с этим именем":rule.ExecutablePath;
+            details.Controls.Add(new Label{Text=path,AccessibleDescription=path,ForeColor=muted,Width=width,Height=36,AutoEllipsis=true,Margin=new Padding(0,0,0,4)});
+            var layout=Toggle("Исправлять раскладку",rule.Layout,v=>{rule.Layout=v;if(input!=null)input.Clear();});
+            var typos=Toggle("Исправлять опечатки и регистр",rule.Typos,v=>{rule.Typos=v;if(input!=null)input.Clear();});
+            var yo=Toggle("Расставлять ё",rule.Yo,v=>{rule.Yo=v;if(input!=null)input.Clear();});
+            foreach(var toggle in new[]{layout,typos,yo}){toggle.Width=width;toggle.Height=34;details.Controls.Add(toggle);}
+        };
+        Action<string> refresh=delegate(string process){list.Items.Clear();foreach(var rule in store.Current.Apps.OrderBy(a=>a.Process,StringComparer.OrdinalIgnoreCase))list.Items.Add(rule);int index=-1;for(int i=0;i<list.Items.Count;i++)if(string.Equals(((AppRule)list.Items[i]).Process,process,StringComparison.OrdinalIgnoreCase)){index=i;break;}list.SelectedIndex=index>=0?index:(list.Items.Count>0?0:-1);render();rail.Invalidate();};
+        commands.Controls.Add(ActionButton("Выбрать программу…",delegate{
+            using(var picker=new System.Windows.Forms.OpenFileDialog{Title="Добавить программу в исключения",Filter="Программы (*.exe)|*.exe",CheckFileExists=true,Multiselect=true,RestoreDirectory=true}){
+                if(picker.ShowDialog(this)!=DialogResult.OK)return;
+                try{string selected=null;foreach(string file in picker.FileNames)selected=AddAppExecutable(file).Process;refresh(selected);}
+                catch(Exception e){MessageBox.Show(this,e.Message,"Не удалось добавить программу",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+            }
+        },220));
+        remove=ActionButton("Удалить исключение",delegate{var rule=list.SelectedItem as AppRule;if(rule==null)return;store.Current.Apps.Remove(rule);store.Save();if(input!=null)input.Clear();refresh(null);},190);commands.Controls.Add(remove);
+        list.SelectedIndexChanged+=delegate{render();};refresh(null);
+    }
+    AppRule AddAppExecutable(string filename){
+        string path=Path.GetFullPath(filename);
+        if(!File.Exists(path)||!string.Equals(Path.GetExtension(path),".exe",StringComparison.OrdinalIgnoreCase))throw new ArgumentException("Выберите существующий файл программы с расширением .exe.");
+        string process=Path.GetFileNameWithoutExtension(path).ToLowerInvariant();
+        var rule=store.Current.Apps.FirstOrDefault(a=>string.Equals(a.Process,process,StringComparison.OrdinalIgnoreCase));
+        if(rule==null){rule=new AppRule{Process=process};store.Current.Apps.Add(rule);}
+        rule.ExecutablePath=path;store.Save();if(input!=null)input.Clear();return rule;
+    }
+    StyledList MakeList(string name){
+        var list=new StyledList{BorderStyle=BorderStyle.None,BackColor=side,ForeColor=ink,DrawMode=DrawMode.OwnerDrawFixed,ItemHeight=34,AccessibleName=name,IntegralHeight=false};
+        list.DrawItem+=delegate(object sender,DrawItemEventArgs e){if(e.Index<0)return;bool selected=(e.State&DrawItemState.Selected)!=0;using(var brush=new SolidBrush(selected?activeNav:side))e.Graphics.FillRectangle(brush,e.Bounds);if(selected)using(var brush=new SolidBrush(textAccent))e.Graphics.FillRectangle(brush,e.Bounds.X,e.Bounds.Y+7,3,e.Bounds.Height-14);var rule=list.Items[e.Index] as AppRule;string text=rule==null?list.Items[e.Index].ToString():rule.Process+".exe";TextRenderer.DrawText(e.Graphics,text,Font,new Rectangle(e.Bounds.X+12,e.Bounds.Y,e.Bounds.Width-24,e.Bounds.Height),selected?textAccent:ink,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);};
+        return list;
     }
     static List<string> Lines(string text){return text.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).Where(s=>s.Length>0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();}
-    void DictionariesPage(FlowLayoutPanel host){
-        SectionPicker(host,new[]{"Пользовательские слова","Выученные правила"},dictionarySection,v=>dictionarySection=v);
-        FlowLayoutPanel c;if(dictionarySection==0){
-        c=Card(host,"Пользовательский словарь","Добавьте распознаваемые слова. По одному слову в строке.");
-        var columns=new TableLayoutPanel{Width=c.Width-8,Height=170,ColumnCount=2,RowCount=2,Margin=new Padding(0)};
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));columns.RowStyles.Add(new RowStyle(SizeType.Absolute,28));columns.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-        columns.Controls.Add(new Label{Text="Русские слова",Dock=DockStyle.Fill,ForeColor=ink},0,0);
-        columns.Controls.Add(new Label{Text="Английские слова",Dock=DockStyle.Fill,ForeColor=ink},1,0);
-        var ru=Field(string.Join(Environment.NewLine,store.Current.RuWords.ToArray()),400,140,true,"Русские слова");ru.Dock=DockStyle.Fill;ru.ScrollBars=ScrollBars.Vertical;columns.Controls.Add(ru,0,1);
-        var en=Field(string.Join(Environment.NewLine,store.Current.EnWords.ToArray()),400,140,true,"Английские слова");en.Dock=DockStyle.Fill;en.ScrollBars=ScrollBars.Vertical;columns.Controls.Add(en,1,1);c.Controls.Add(columns);
-        c.Controls.Add(ActionButton("Сохранить словари",delegate{store.Current.RuWords=Lines(ru.Text);store.Current.EnWords=Lines(en.Text);engine.AddUserWords(store.Current);store.Save();},180));
-        return;}
-        c=Card(host,"Выученные правила","Правило «исходное → исходное» означает: не исправлять это слово. Выберите строку для удаления.");
-        var list=new StyledList{Width=c.Width-8,Height=150,BorderStyle=BorderStyle.None,BackColor=side,ForeColor=ink,DrawMode=DrawMode.OwnerDrawFixed,ItemHeight=34,AccessibleName="Выученные правила",IntegralHeight=false};
-        list.DrawItem+=delegate(object sender,DrawItemEventArgs e){if(e.Index<0)return;bool selected=(e.State&DrawItemState.Selected)!=0;using(var brush=new SolidBrush(selected?activeNav:side))e.Graphics.FillRectangle(brush,e.Bounds);TextRenderer.DrawText(e.Graphics,list.Items[e.Index].ToString(),Font,new Rectangle(e.Bounds.X+12,e.Bounds.Y,e.Bounds.Width-24,e.Bounds.Height),selected?textAccent:ink,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);e.DrawFocusRectangle();};
-        foreach(var p in store.Current.Learned.OrderBy(x=>x.Key))list.Items.Add(p.Key+" → "+p.Value);
-        var listScroll=new ScrollRail(()=>list.TopIndex,()=>list.Items.Count,()=>list.Height/list.ItemHeight,line=>{if(list.Items.Count>0)list.TopIndex=line;}){BackColor=side,ForeColor=muted};
-        list.SelectedIndexChanged+=delegate{listScroll.Invalidate();};list.KeyUp+=delegate{listScroll.Invalidate();};list.MouseWheel+=delegate{if(list.IsHandleCreated)list.BeginInvoke((Action)(()=>listScroll.Invalidate()));};c.Controls.Add(ScrollContainer(list,listScroll,c.Width-8,150));
-        c.Controls.Add(ActionButton("Удалить правило",delegate{if(list.SelectedIndex<0)return;string key=list.SelectedItem.ToString().Split(new[]{" → "},StringSplitOptions.None)[0];store.Current.Learned.Remove(key);store.Save();list.Items.RemoveAt(list.SelectedIndex);},160));
-    }
     void HotkeysPage(FlowLayoutPanel host){
         SectionPicker(host,new[]{"Shift и Pause","Сочетания клавиш"},hotkeySection,v=>hotkeySection=v);
         var c=Card(host,"Ручное управление","Shift, Double Shift и Pause работают вручную. Для дополнительных команд задайте сочетания.");
@@ -288,14 +306,6 @@ public sealed class MainForm : Form {
         c.Controls.Add(ActionButton("Применить сочетания",delegate{store.Current.WordHotkey=manualWord.Text;store.Current.SelectedHotkey=selected.Text;store.Current.UndoHotkey=undo.Text;store.Current.ToggleHotkey=toggle.Text;store.Save();RegisterHotkeys();status.Text=HotkeyStatus();},190));c.Controls.Add(status);
     }
     FlowLayoutPanel HotkeyRow(string name,RoundedField box){var r=Row();box.Height=34;box.Margin=new Padding(0,0,8,0);r.Controls.Add(new Label{Text=name,Width=190,Height=34,Margin=new Padding(0),ForeColor=ink,TextAlign=ContentAlignment.MiddleLeft});r.Controls.Add(box);return r;}
-    void StyleGrid(DataGridView grid){
-        grid.BackColor=card;grid.BorderStyle=BorderStyle.None;grid.CellBorderStyle=DataGridViewCellBorderStyle.SingleHorizontal;grid.GridColor=border;grid.EnableHeadersVisualStyles=false;grid.ColumnHeadersBorderStyle=DataGridViewHeaderBorderStyle.None;grid.ColumnHeadersHeightSizeMode=DataGridViewColumnHeadersHeightSizeMode.DisableResizing;grid.ColumnHeadersHeight=38;grid.RowTemplate.Height=34;
-        grid.DefaultCellStyle=new DataGridViewCellStyle{BackColor=card,ForeColor=ink,SelectionBackColor=activeNav,SelectionForeColor=ink,Padding=new Padding(8,0,8,0)};
-        grid.ColumnHeadersDefaultCellStyle=new DataGridViewCellStyle{BackColor=side,ForeColor=muted,Font=new Font("Segoe UI Semibold",10),Padding=new Padding(8,0,8,0)};
-        grid.EditingControlShowing+=delegate(object sender,DataGridViewEditingControlShowingEventArgs e){e.Control.BackColor=side;e.Control.ForeColor=ink;var editor=e.Control as TextBox;if(editor!=null)editor.BorderStyle=BorderStyle.None;};
-        grid.CellPainting+=delegate(object sender,DataGridViewCellPaintingEventArgs e){if(e.RowIndex<0||e.ColumnIndex<0||!(grid.Columns[e.ColumnIndex] is DataGridViewCheckBoxColumn))return;using(var brush=new SolidBrush((e.State&DataGridViewElementStates.Selected)!=0?activeNav:card))e.Graphics.FillRectangle(brush,e.CellBounds);using(var pen=new Pen(border))e.Graphics.DrawLine(pen,e.CellBounds.Left,e.CellBounds.Bottom-1,e.CellBounds.Right,e.CellBounds.Bottom-1);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;bool value=e.Value is bool&&(bool)e.Value;ControlShape.Switch(e.Graphics,new Rectangle(e.CellBounds.X+(e.CellBounds.Width-34)/2,e.CellBounds.Y+(e.CellBounds.Height-20)/2,34,20),value,accent,muted);if(grid.CurrentCell!=null&&grid.CurrentCell.RowIndex==e.RowIndex&&grid.CurrentCell.ColumnIndex==e.ColumnIndex&&grid.Focused)e.Paint(e.ClipBounds,DataGridViewPaintParts.Focus);e.Handled=true;};
-        grid.CurrentCellDirtyStateChanged+=delegate{if(grid.IsCurrentCellDirty&&grid.CurrentCell is DataGridViewCheckBoxCell)grid.CommitEdit(DataGridViewDataErrorContexts.Commit);};
-    }
     Panel ScrollContainer(Control editor,ScrollRail rail,int width,int height){var panel=new Panel{Width=width,Height=height,BackColor=editor.BackColor,Padding=new Padding(2),Margin=new Padding(0,3,0,3)};editor.Dock=DockStyle.Fill;rail.Dock=DockStyle.Right;rail.Width=18;panel.Controls.Add(editor);panel.Controls.Add(rail);return panel;}
     string HotkeyStatus(){return hotkeyErrors.Count==0?"Сочетания зарегистрированы.":string.Join("; ",hotkeyErrors.Values.ToArray());}
     void UpdateStatus(){

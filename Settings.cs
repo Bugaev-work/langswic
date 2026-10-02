@@ -7,10 +7,12 @@ using Microsoft.Win32;
 namespace FastSwitcher {
 public sealed class AppRule {
     public string Process {get;set;}
+    public string ExecutablePath {get;set;}
     public bool Layout {get;set;}
     public bool Typos {get;set;}
     public bool Yo {get;set;}
     public AppRule() { Process=""; Layout=false; Typos=false; Yo=false; }
+    public override string ToString(){return Process+".exe";}
 }
 public sealed class Settings {
     public bool Enabled {get;set;}

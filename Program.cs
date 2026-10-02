@@ -46,7 +46,7 @@ static class Program {
             if(!string.Equals(Application.ExecutablePath,target,StringComparison.OrdinalIgnoreCase))File.Copy(Application.ExecutablePath,target,true);
             Shortcut(StartMenu(),target);
             using(var key=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\langswic")){
-                key.SetValue("DisplayName","langswic");key.SetValue("DisplayVersion","1.5.3");key.SetValue("Publisher","langswic");
+                key.SetValue("DisplayName","langswic");key.SetValue("DisplayVersion","1.5.4");key.SetValue("Publisher","langswic");
                 key.SetValue("InstallLocation",dir);key.SetValue("DisplayIcon",target);
                 key.SetValue("UninstallString","\""+target+"\" --uninstall");key.SetValue("NoModify",1,RegistryValueKind.DWord);
             }
@@ -221,7 +221,7 @@ static class SmokeTest {
         if(Directory.Exists(directory))foreach(string file in Directory.GetFiles(directory))File.Delete(file);
         if(Directory.Exists(directory))Directory.Delete(directory,false);SettingsStore.TestDirectory=null;
 #endif
-        Console.WriteLine(ready?"OK five UI pages and ten sections without page scrolling, layout and keyboard hook":"FAIL UI pages, clipping, layout or keyboard hook");return ready?0:1;
+        Console.WriteLine(ready?"OK four UI pages and eight sections without page scrolling, layout and keyboard hook":"FAIL UI pages, clipping, layout or keyboard hook");return ready?0:1;
     }
     static void Capture(Form form,string name){Application.DoEvents();using(var bitmap=new System.Drawing.Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new System.Drawing.Rectangle(0,0,form.Width,form.Height));bitmap.Save(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath),name));}}
 }
