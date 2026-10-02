@@ -30,6 +30,7 @@ public sealed class InputService : IDisposable {
     string process=""; AppRule policy; int[] currentElementId;
     long sequence; uint lastShiftTime; bool shiftOnly,shiftPressed,controlPressed,altPressed,pendingManual; int shiftToken;
     ActionInfo lastAction;
+    IntPtr shiftWindow;
     public int Corrections {get;private set;}
     public int SkippedProtected {get;private set;}
     public int FailedInjection {get;private set;}
@@ -88,9 +89,26 @@ public sealed class InputService : IDisposable {
         if(released||ticks>20){t.Stop();t.Dispose();if(released)action();else{LastReason="Клавиша-модификатор удерживается — замена пропущена";Notify();}}
     };t.Start();}
     void ScheduleSingleShift(int token){
+        IntPtr window=Native.GetForegroundWindow();long intent=pump.LayoutIntentGeneration;
         var t=CreateTimer(470);t.Tick+=delegate{t.Stop();t.Dispose();if(token!=shiftToken||shiftPressed||!store.Current.SingleShift)return;
-            IntPtr w,f,l;if(SafeFocus(out w,out f,out l)){SwitchLayout(w,l);Sound(ChangeKind.Layout);LastReason="Ручное переключение раскладки";Notify();}
+            if(Native.GetForegroundWindow()!=window || intent!=pump.LayoutIntentGeneration || controlPressed || altPressed)return;
+            SwapLayoutOnly();
         };t.Start();
+    }
+    bool LayoutFocus(out IntPtr window,out IntPtr focus,out IntPtr layout){
+        window=Native.GetForegroundWindow();focus=IntPtr.Zero;layout=IntPtr.Zero;if(window==IntPtr.Zero)return false;
+        uint pid;uint thread=Native.GetWindowThreadProcessId(window,out pid);
+        var info=new Native.GUITHREADINFO{cbSize=Marshal.SizeOf(typeof(Native.GUITHREADINFO))};
+        if(thread==0 || !Native.GetGUIThreadInfo(thread,ref info))return false;
+        focus=info.hwndFocus==IntPtr.Zero?window:info.hwndFocus;
+        uint focusThread=Native.GetWindowThreadProcessId(focus,out pid);
+        layout=Native.GetKeyboardLayout(focusThread==0?thread:focusThread);
+        long language=(long)layout&0xffff;return language==0x0409 || language==0x0419;
+    }
+    void SwapLayoutOnly(){
+        IntPtr w,f,l;if(!LayoutFocus(out w,out f,out l))return;
+        Reset();SetLanguage(w,((long)l&0xffff)==0x0409?0x0419u:0x0409u,f);
+        Sound(ChangeKind.Layout);LastReason="Ручное переключение раскладки без изменения текста";Notify();
     }
     static bool Letter(char c){return char.IsLetter(c)||c=='ё'||c=='Ё';}
     bool SafeFocus(out IntPtr hwnd,out IntPtr focus,out IntPtr layout){
@@ -142,15 +160,15 @@ public sealed class InputService : IDisposable {
         try {
             if(k.vk==Native.VK_SHIFT || k.vk==0xA0 || k.vk==0xA1){
                 if(up){shiftPressed=false;lastShiftTime=k.time;
-                    if(pendingManual){pendingManual=false;Post(()=>AfterModifiers(ManualOrUndoCore));}
+                    if(pendingManual){pendingManual=false;Post(()=>AfterModifiers(()=>ManualOrUndoCore(true)));}
                     else if(shiftOnly && store.Current.SingleShift)Post(()=>ScheduleSingleShift(shiftToken));
                     return IntPtr.Zero;
                 }
                 if(shiftPressed)return IntPtr.Zero;
                 shiftPressed=true;
-                bool doubleShift=store.Current.DoubleShift && shiftOnly && unchecked(k.time-lastShiftTime)<430;
+                bool doubleShift=store.Current.DoubleShift && shiftOnly && input.Window==shiftWindow && unchecked(k.time-lastShiftTime)<430;
                 shiftToken++;
-                if(doubleShift){shiftOnly=false;pendingManual=true;}else shiftOnly=true;
+                if(doubleShift){shiftOnly=false;pendingManual=true;}else{shiftWindow=input.Window;shiftOnly=!controlPressed&&!altPressed&&!Native.AsyncDown(Native.VK_CONTROL)&&!Native.AsyncDown(Native.VK_MENU)&&!Native.AsyncDown(0x5B)&&!Native.AsyncDown(0x5C);}
                 return IntPtr.Zero;
             }
             if(k.vk==Native.VK_CONTROL||k.vk==0xA2||k.vk==0xA3){controlPressed=down;shiftOnly=false;return IntPtr.Zero;}
@@ -305,20 +323,19 @@ public sealed class InputService : IDisposable {
             Corrections++;Sound(decision.Kind);LastReason=decision.Reason;Notify();
         };timer.Start();
     }
-    void SwitchLayout(IntPtr window,IntPtr current){
-        uint target=((long)current&0xffff)==0x0409?0x0419u:0x0409u;
-        SetLanguage(window,target);
-    }
     void SetTextLayout(IntPtr window,string text){
         bool ru=text.Any(c=>(c>='а'&&c<='я')||(c>='А'&&c<='Я')||c=='ё'||c=='Ё');
         bool en=text.Any(c=>(c>='a'&&c<='z')||(c>='A'&&c<='Z'));
         if(ru!=en)SetLanguage(window,ru?0x0419u:0x0409u);
     }
     void SetLanguage(IntPtr window,uint target){
+        SetLanguage(window,target,currentFocus);
+    }
+    void SetLanguage(IntPtr window,uint target,IntPtr focus){
         int count=Native.GetKeyboardLayoutList(0,null);if(count<=0)return;
         var layouts=new IntPtr[count];Native.GetKeyboardLayoutList(count,layouts);
         foreach(var item in layouts)if(((long)item&0xffff)==target){
-            IntPtr focus=currentFocus;long generation=pump.Generation;long intent=pump.LayoutIntentGeneration;int token=++layoutToken;
+            long generation=pump.Generation;long intent=pump.LayoutIntentGeneration;int token=++layoutToken;
             if(!CanChange(generation,window,focus))return;
             uint pid;uint thread=Native.GetWindowThreadProcessId(focus,out pid);
             IntPtr source=Native.GetKeyboardLayout(thread);
@@ -351,8 +368,11 @@ public sealed class InputService : IDisposable {
     }
     public void ManualWord(){Post(()=>AfterModifiers(ManualWordCore));}
     void ManualWordCore(){
+        ManualWordCore(false);
+    }
+    void ManualWordCore(bool allowLayoutOnly){
         sequence=pump.Generation;
-        IntPtr w,f,l;if(!SafeFocus(out w,out f,out l))return;
+        IntPtr w,f,l;if(!SafeFocus(out w,out f,out l)){if(allowLayoutOnly)SwapLayoutOnly();return;}
         string source="",delimiter="";bool available=false;
         for(int attempt=0;attempt<5;attempt++){
             if(!CanChange(sequence,w,f))return;
@@ -360,10 +380,11 @@ public sealed class InputService : IDisposable {
             Thread.Sleep(30);
         }
         if(!available){
+            if(allowLayoutOnly){SwapLayoutOnly();return;}
             LastReason="Слово у курсора недоступно";Notify();return;
         }
         string target=engine.Convert(source);
-        if(target==source)return;
+        if(target==source){if(allowLayoutOnly)SwapLayoutOnly();return;}
         if(ReplaceVerifiedTail(f,source+delimiter,target+delimiter,()=>SetTextLayout(w,target))){
             word=delimiter.Length==0?target:"";lastWord=target;
             lastAction=new ActionInfo{Window=w,Focus=f,ElementId=FocusId(),Sequence=sequence,Before=source,After=target,Delimiter=delimiter,Kind=ChangeKind.Layout,At=DateTime.UtcNow};
@@ -387,7 +408,7 @@ public sealed class InputService : IDisposable {
         if(stopped || pump.Generation!=generation || Native.GetForegroundWindow()!=window)return false;
         uint pid;uint thread=Native.GetWindowThreadProcessId(window,out pid);
         var info=new Native.GUITHREADINFO{cbSize=Marshal.SizeOf(typeof(Native.GUITHREADINFO))};
-        return Native.GetGUIThreadInfo(thread,ref info) && info.hwndFocus==focus;
+        return Native.GetGUIThreadInfo(thread,ref info) && (info.hwndFocus==focus || (info.hwndFocus==IntPtr.Zero && focus==window));
     }
     bool ReadWordAtCaret(IntPtr focus,out string source,out string delimiter,bool includeTrailingSymbols=false){
         source="";delimiter="";Native.EditSnapshot edit;
@@ -403,6 +424,9 @@ public sealed class InputService : IDisposable {
     }
     public void ManualOrUndo(){Post(()=>AfterModifiers(ManualOrUndoCore));}
     void ManualOrUndoCore(){
+        ManualOrUndoCore(false);
+    }
+    void ManualOrUndoCore(bool allowLayoutOnly){
         if(lastAction!=null && lastAction.Window==Native.GetForegroundWindow() && lastAction.Sequence==sequence && (DateTime.UtcNow-lastAction.At).TotalSeconds<=30){
             long generation=pump.Generation;
             for(int attempt=0;attempt<4;attempt++){
@@ -412,7 +436,7 @@ public sealed class InputService : IDisposable {
             }
             lastAction=null;
         }
-        bool hadSelection;if(!TryManualSelection(out hadSelection) && !hadSelection)ManualWordCore();
+        bool hadSelection;if(!TryManualSelection(out hadSelection) && !hadSelection)ManualWordCore(allowLayoutOnly);
     }
     public void ManualSelection(){Post(()=>AfterModifiers(delegate{bool ignored;TryManualSelection(out ignored);}));}
     bool TryManualSelection(out bool hadSelection){

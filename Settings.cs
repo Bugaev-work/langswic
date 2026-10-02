@@ -36,7 +36,7 @@ public sealed class Settings {
     public List<string> RuWords {get;set;}
     public List<string> EnWords {get;set;}
     public Settings() {
-        Enabled=true; Layout=true; Typos=true; Yo=true; DoubleShift=true; Pause=true;
+        Enabled=true; Layout=true; Typos=true; Yo=true; DoubleShift=true; SingleShift=true; Pause=true;
         SelectedHotkey="Ctrl+Alt+F12"; WordHotkey="Ctrl+Alt+F9"; UndoHotkey="Ctrl+Alt+F11"; ToggleHotkey="Ctrl+Alt+F10";
         LayoutSoundFile=""; TypoSoundFile="";
         Apps=new List<AppRule>(); ExcludedWords=new List<string>(); Learned=new Dictionary<string,string>();

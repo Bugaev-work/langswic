@@ -16,21 +16,12 @@ $nativeResource = '/resource:' + $nativeDll + ',FastSwitcher.NativeLayout64'
 $assets = Join-Path $PSScriptRoot 'assets'
 New-Item -ItemType Directory -Path $assets -Force | Out-Null
 $iconPath = Join-Path $assets 'langswic.ico'
-Add-Type -AssemblyName System.Drawing
-$bitmap = New-Object System.Drawing.Bitmap(64, 64)
-$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-$graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-$graphics.Clear([System.Drawing.Color]::Transparent)
-$orange = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(36, 113, 243))
-$white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
-$font = New-Object System.Drawing.Font('Segoe UI', 34, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-$graphics.FillEllipse($orange, 2, 2, 60, 60)
-$graphics.DrawString('L', $font, $white, 18, 5)
-$icon = [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
-$stream = [System.IO.File]::Create($iconPath)
-$icon.Save($stream)
-$stream.Close()
-$graphics.Dispose(); $orange.Dispose(); $white.Dispose(); $font.Dispose(); $bitmap.Dispose()
+$brandBuilder = Join-Path $out 'GenerateBrand.exe'
+& $csc /nologo /utf8output /target:exe ('/out:' + $brandBuilder) ('/reference:' + (Join-Path $framework 'System.Drawing.dll')) (Join-Path $PSScriptRoot 'BrandLogo.cs') (Join-Path $assets 'GenerateBrand.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Brand assets compiler failed.' }
+& $brandBuilder $assets
+if ($LASTEXITCODE -ne 0) { throw 'Brand assets generation failed.' }
+$brandResource = '/resource:' + $iconPath + ',Langswic.BrandIcon'
 $references = @(
   (Join-Path $framework 'System.dll'),
   (Join-Path $framework 'System.Core.dll'),
@@ -46,9 +37,9 @@ $testReferenceArgs = @($referenceArgs + @(
     ForEach-Object { '/reference:' + (Join-Path $wpf $_) }
 ) + @(('/reference:' + (Join-Path $framework 'System.Xaml.dll')), ('/reference:' + (Join-Path $wpf 'UIAutomationProvider.dll'))))
 $sources = @(Get-ChildItem $PSScriptRoot -Filter '*.cs' | ForEach-Object FullName)
-& $csc /nologo /utf8output /platform:x64 /target:winexe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'langswic.exe')) $nativeResource $referenceArgs $sources
+& $csc /nologo /utf8output /platform:x64 /target:winexe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'langswic.exe')) $nativeResource $brandResource $referenceArgs $sources
 if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }
-& $csc /nologo /utf8output /define:INPUT_TEST /platform:x64 /target:exe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'langswic.Tests.exe')) $nativeResource $testReferenceArgs $sources
+& $csc /nologo /utf8output /define:INPUT_TEST /platform:x64 /target:exe ('/win32icon:' + $iconPath) ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $out 'langswic.Tests.exe')) $nativeResource $brandResource $testReferenceArgs $sources
 if ($LASTEXITCODE -ne 0) { throw 'Test build failed.' }
 if ($CompileOnly) { Write-Output 'Compilation complete; tests and installer were not run.'; exit 0 }
 & (Join-Path $out 'langswic.Tests.exe') --self-test

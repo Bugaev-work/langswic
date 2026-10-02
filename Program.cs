@@ -43,7 +43,7 @@ static class Program {
             if(!string.Equals(Application.ExecutablePath,target,StringComparison.OrdinalIgnoreCase))File.Copy(Application.ExecutablePath,target,true);
             Shortcut(StartMenu(),target);
             using(var key=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\langswic")){
-                key.SetValue("DisplayName","langswic");key.SetValue("DisplayVersion","1.5.0");key.SetValue("Publisher","Личный проект");
+                key.SetValue("DisplayName","langswic");key.SetValue("DisplayVersion","1.5.1");key.SetValue("Publisher","Личный проект");
                 key.SetValue("InstallLocation",dir);key.SetValue("DisplayIcon",target);
                 key.SetValue("UninstallString","\""+target+"\" --uninstall");key.SetValue("NoModify",1,RegistryValueKind.DWord);
             }

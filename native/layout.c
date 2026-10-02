@@ -19,7 +19,8 @@ __declspec(dllexport) LRESULT CALLBACK LayoutHook(int code, WPARAM wp, LPARAM lp
             if (root && GetForegroundWindow() == root &&
                 GetAncestor(message->hwnd, GA_ROOT) == root &&
                 thread == GetCurrentThreadId() && GetGUIThreadInfo(thread, &info) &&
-                info.hwndFocus == message->hwnd) {
+                (info.hwndFocus == message->hwnd ||
+                 (!info.hwndFocus && message->hwnd == root))) {
                 HKL layouts[64];
                 int count = GetKeyboardLayoutList(64, layouts);
                 for (int i = 0; i < count; ++i) {

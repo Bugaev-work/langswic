@@ -40,6 +40,8 @@ internal static class InputIntegrationTests {
     static void English(IntPtr target){Native.PostMessage(target,0x8001,IntPtr.Zero,IntPtr.Zero);}
     static void Russian(IntPtr target){Native.PostMessage(target,0x8002,IntPtr.Zero,IntPtr.Zero);}
     static bool TargetLanguage(IntPtr target,int language){uint pid;return ((long)Native.GetKeyboardLayout(Native.GetWindowThreadProcessId(target,out pid))&0xffff)==language;}
+    static async Task<bool> WaitLanguage(IntPtr target,int language){for(int i=0;i<30;i++){if(TargetLanguage(target,language))return true;await Task.Delay(100);}return false;}
+    [DllImport("user32.dll")]static extern IntPtr SetFocus(IntPtr window);
     static string LayoutInfo(IntPtr target){uint pid;uint thread=Native.GetWindowThreadProcessId(target,out pid);return "thread="+thread+" hkl="+Native.GetKeyboardLayout(thread).ToInt64().ToString("X");}
     static async Task Focus(IntPtr target){
         for(int i=0;i<15;i++){
@@ -77,6 +79,21 @@ internal static class InputIntegrationTests {
                 for(int i=0;i<50&&!File.Exists(path+".ready");i++)await Task.Delay(100);
                 if(!File.Exists(path+".ready"))throw new InvalidOperationException("Test target did not start");
                 IntPtr target=new IntPtr(long.Parse(File.ReadAllText(path+".ready")));
+                English(target);await Focus(target);await Task.Delay(120);Keys(Native.VK_SHIFT);
+                if(await WaitLanguage(target,0x0419) && Read(path)=="")Console.WriteLine("OK Single Shift changes language in an empty field without text");
+                else{Console.WriteLine("FAIL empty Single Shift: "+host.InputDiagnostic);failed++;}
+                DoubleShift();bool emptyDouble=await WaitLanguage(target,0x0409);await Task.Delay(550);
+                if(emptyDouble && TargetLanguage(target,0x0409) && Read(path)=="")Console.WriteLine("OK empty Double Shift changes language once and cancels pending Single Shift");
+                else{Console.WriteLine("FAIL empty Double Shift: "+host.InputDiagnostic);failed++;}
+                Native.PostMessage(target,0x800D,IntPtr.Zero,IntPtr.Zero);await Task.Delay(150);Keys(Native.VK_SHIFT);
+                if(await WaitLanguage(target,0x0419) && Read(path)=="")Console.WriteLine("OK Single Shift with no focused editor");else{Console.WriteLine("FAIL no-focus Single Shift: "+host.InputDiagnostic);failed++;}
+                DoubleShift();
+                if(await WaitLanguage(target,0x0409))Console.WriteLine("OK Double Shift with no focused editor");else{Console.WriteLine("FAIL no-focus Double Shift: "+host.InputDiagnostic);failed++;}
+                await Focus(target);host.SetAutomationForTest(false);await Task.Delay(150);Keys(Native.VK_SHIFT);
+                if(await WaitLanguage(target,0x0419))Console.WriteLine("OK Single Shift remains manual when automation is disabled");else{Console.WriteLine("FAIL disabled automation Single Shift");failed++;}
+                DoubleShift();
+                if(await WaitLanguage(target,0x0409))Console.WriteLine("OK Double Shift remains manual when automation is disabled");else{Console.WriteLine("FAIL disabled automation Double Shift");failed++;}
+                host.SetAutomationForTest(true);await Task.Delay(150);
                 English(target);await Focus(target);await Task.Delay(120);
                 Keys(0x48,0x45,0x4C,0x4C,0x4F,Native.VK_SPACE);
                 if(await WaitFor(path,"hello "))Console.WriteLine("OK initial English word stays English");
@@ -325,6 +342,7 @@ internal static class InputIntegrationTests {
             if(m.Msg==0x8001){var h=Native.LoadKeyboardLayout("00000409",1);if(h!=IntPtr.Zero)Native.ActivateKeyboardLayout(h,0);}
             if(m.Msg==0x8002){var h=Native.LoadKeyboardLayout("00000419",1);if(h!=IntPtr.Zero)Native.ActivateKeyboardLayout(h,0);}
             if(m.Msg==0x8003){Activate();if(Box!=null)Box.Focus();}
+            if(m.Msg==0x800D)SetFocus(IntPtr.Zero);
             if(m.Msg==0x800B){((IgnoringLayoutTextBox)Box).DelayCharacters=true;}
             if(m.Msg==0x800C){((IgnoringLayoutTextBox)Box).DelayCharacters=false;}
             if(m.Msg==0x8004 && Box!=null){Box.Text="привет how are";Box.SelectionStart=Box.TextLength;Box.SelectionLength=0;}

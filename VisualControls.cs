@@ -15,7 +15,8 @@ internal sealed class BlueHeader : Panel {
             path.AddLine(Width+70,Height+65,-80,Height+65);path.CloseFigure();
             using(var brush=new SolidBrush(Color.FromArgb(42,11,101,238)))e.Graphics.FillPath(brush,path);
         }
-        using(var font=new Font("Segoe UI",30,FontStyle.Bold))TextRenderer.DrawText(e.Graphics,"LANGSWIC",font,new Rectangle(0,23,Width,57),Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
+        BrandLogo.Draw(e.Graphics,new RectangleF(Width/2-180,18,66,66));
+        using(var font=new Font("Segoe UI",30,FontStyle.Bold))TextRenderer.DrawText(e.Graphics,"LANGSWIC",font,new Rectangle(Width/2-103,23,300,57),Color.White,TextFormatFlags.Left|TextFormatFlags.VerticalCenter);
         using(var font=new Font("Segoe UI",11))TextRenderer.DrawText(e.Graphics,"Автоматическое переключение RU / EN",font,new Rectangle(0,80,Width,31),Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
     }
 }
@@ -33,7 +34,7 @@ internal sealed class FeatureTile : CheckBox {
             else{Star(g,Accent,x+64,y+39,19);Star(g,Accent,x+35,y+67,15);}
         }
         using(var font=new Font("Segoe UI Semibold",13))TextRenderer.DrawText(g,Text,font,new Rectangle(0,128,Width,34),Ink,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
-        TextRenderer.DrawText(g,Checked?"Включено":"Выключено",Font,new Rectangle(0,164,Width,25),Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
+        TextRenderer.DrawText(g,(Symbol==2?"Опечатки и ё · ":"")+(Checked?"Включено":"Выключено"),Font,new Rectangle(0,164,Width,25),Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
         int sx=(Width-40)/2,sy=196;
         using(var path=Round(new Rectangle(sx,sy,40,22),11))using(var brush=new SolidBrush(Checked?Accent:Color.FromArgb(161,169,185)))g.FillPath(brush,path);
         using(var brush=new SolidBrush(Color.White))g.FillEllipse(brush,sx+(Checked?21:3),sy+3,16,16);
