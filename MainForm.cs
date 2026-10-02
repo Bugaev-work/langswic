@@ -34,10 +34,10 @@ sealed class PillButton : Button {
         using(var p=new GraphicsPath()){
             p.AddArc(r.Left,r.Top,d,d,180,90);p.AddArc(r.Right-d,r.Top,d,d,270,90);
             p.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);p.AddArc(r.Left,r.Bottom-d,d,d,90,90);p.CloseFigure();
-            using(var brush=new SolidBrush(hover?(BackColor.GetBrightness()>.6?Color.FromArgb(221,233,252):Color.FromArgb(30,96,211)):BackColor))e.Graphics.FillPath(brush,p);
+            using(var brush=new SolidBrush(hover?(BackColor.B>150&&BackColor.R<80?Color.FromArgb(30,96,211):BackColor.GetBrightness()>.6?Color.FromArgb(221,233,252):Color.FromArgb(36,48,67)):BackColor))e.Graphics.FillPath(brush,p);
         }
         TextRenderer.DrawText(e.Graphics,Text,Font,r,ForeColor,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
-        if(Focused)ControlPaint.DrawFocusRectangle(e.Graphics,new Rectangle(7,5,Width-14,Height-10),Color.White,BackColor);
+        if(Focused)ControlPaint.DrawFocusRectangle(e.Graphics,new Rectangle(7,5,Width-14,Height-10),ForeColor,BackColor);
     }
 }
 public sealed class MainForm : Form {
@@ -51,7 +51,7 @@ public sealed class MainForm : Form {
     ToolStripMenuItem trayStatus,trayAutomatic,trayStartup;
     readonly Dictionary<int,string> hotkeyErrors=new Dictionary<int,string>();
     Timer diagnosticTimer; bool exiting=false; int page=0;
-    Color bg,card,ink,muted,accent,border,side,activeNav;
+    Color bg,card,ink,muted,accent,textAccent,border,side,activeNav;
     public bool HookReady {get{return input!=null&&input.HookActive;}}
     public string InputDiagnostic {get{return input==null?"not started":input.LastReason+"; corrections="+input.Corrections+"; process="+input.ActiveProcess+"; "+input.LayoutDiagnostic+"; "+TextAccess.ReadState;}}
     public int InputVerifiedValueReplacements {get{return input==null?0:input.VerifiedValueReplacements;}}
@@ -67,6 +67,20 @@ public sealed class MainForm : Form {
     }
     internal void SmokeTheme(){ChangeTheme();}
     internal bool SmokeFeatures(){bool original=store.Current.Layout;autoTile.AccessibilityObject.DoDefaultAction();bool changed=store.Current.Layout!=original;autoTile.AccessibilityObject.DoDefaultAction();return changed && store.Current.Layout==original;}
+    static IEnumerable<Control> Descendants(Control root){foreach(Control child in root.Controls){yield return child;foreach(var nested in Descendants(child))yield return nested;}}
+    internal bool SmokeControls(){
+        settingsSection=0;ShowPage(1);bool previous=store.Current.Enabled;
+        var toggle=Descendants(content).OfType<SwitchRow>().First();toggle.AccessibilityObject.DoDefaultAction();bool ok=store.Current.Enabled!=previous;toggle.AccessibilityObject.DoDefaultAction();ok=ok&&store.Current.Enabled==previous;
+        Descendants(content).OfType<SegmentButton>().ElementAt(1).AccessibilityObject.DoDefaultAction();Application.DoEvents();ok=ok&&settingsSection==1;
+        var field=Descendants(content).OfType<RoundedField>().First();string old=field.Text;field.Editor.Focus();field.Editor.Text="C:\\Sounds\\local.wav";field.Editor.Select(3,6);ok=ok&&field.Text=="C:\\Sounds\\local.wav"&&field.Editor.SelectedText=="Sounds";
+        Descendants(content).OfType<PillButton>().First().Focus();Application.DoEvents();ok=ok&&store.Current.LayoutSoundFile==field.Text;
+        field.Text=old;store.Current.LayoutSoundFile=old;store.Save();
+        exceptionSection=0;ShowPage(2);field=Descendants(content).OfType<RoundedField>().First();old=field.Text;field.Text=string.Join(Environment.NewLine,Enumerable.Range(0,80).Select(i=>"слово"+i).ToArray());field.Editor.Select(0,0);field.ScrollToForTest(30);ok=ok&&field.ScrollPosition>0&&field.Editor.SelectionStart==0;field.Text=old;
+        exceptionSection=1;ShowPage(2);var grid=Descendants(content).OfType<DataGridView>().First();var rail=Descendants(content).OfType<ScrollRail>().First();rail.ScrollTo(4);ok=ok&&grid.FirstDisplayedScrollingRowIndex>0&&grid.Columns[0].HeaderText=="Процесс";
+        var savedRules=new Dictionary<string,string>(store.Current.Learned);store.Current.Learned.Clear();for(int i=0;i<30;i++)store.Current.Learned.Add("пример"+i,"example"+i);
+        dictionarySection=1;ShowPage(3);var list=Descendants(content).OfType<StyledList>().First();list.SelectedIndex=1;rail=Descendants(content).OfType<ScrollRail>().First();rail.ScrollTo(12);ok=ok&&list.TopIndex==12&&list.SelectedIndex==1;
+        store.Current.Learned=savedRules;store.Save();settingsSection=exceptionSection=dictionarySection=0;ShowPage(0);Console.WriteLine(ok?"OK custom switches, accessible categories, field selection/save and text/table/list scrolling":"FAIL custom control interaction");return ok;
+    }
     internal System.Threading.Tasks.Task DelayInputWorkerForTest(int ms){return input.DelayWorkerForTest(ms);}
     internal void ForgetRuleForTest(string word){store.Current.Learned.Remove(word);}
     internal void SetAutomationForTest(bool enabled){store.Current.Enabled=enabled;input.Clear();}
@@ -77,7 +91,11 @@ public sealed class MainForm : Form {
         for(int i=0;i<5;i++)for(int j=0;j<counts[i];j++){
             if(i==1)settingsSection=j;if(i==2)exceptionSection=j;if(i==3)dictionarySection=j;if(i==4)hotkeySection=j;
             ShowPage(i);Application.DoEvents();
-            if(content.Controls.Count==0 || content.Controls[0].Height<100 || content.Controls[0].Bottom>content.ClientSize.Height || content.Controls[0].Right>content.ClientSize.Width)valid=false;
+            if(content.Controls.Count==0 || content.Controls[0].Height<100 || content.Controls[0].Bottom>content.ClientSize.Height || content.Controls[0].Right>content.ClientSize.Width){valid=false;
+#if INPUT_TEST
+                Console.WriteLine("FAIL page bounds: "+i+"/"+j+" bottom="+content.Controls[0].Bottom+" available="+content.ClientSize.Height);
+#endif
+            }
 #if INPUT_TEST
             using(var bitmap=new Bitmap(Width,Height)){DrawToBitmap(bitmap,new Rectangle(0,0,Width,Height));bitmap.Save(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath),"ui-page-"+i+"-"+j+(store.Current.DarkTheme?"-dark":"")+".png"));}
 #endif
@@ -110,11 +128,11 @@ public sealed class MainForm : Form {
         content=new Panel{Dock=DockStyle.Fill,AutoScroll=false};Controls.Add(content);
         var navigation=new TableLayoutPanel{Dock=DockStyle.Top,Height=48,Padding=new Padding(24,4,24,4),ColumnCount=5,RowCount=1};sidebar=navigation;Controls.Add(sidebar);
         string[] names={"Обзор","Настройки","Исключения","Словари","Горячие клавиши"};
-        for(int i=0;i<names.Length;i++){navigation.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));int index=i;var b=new Button{Text=names[i],Dock=DockStyle.Fill,FlatStyle=FlatStyle.Flat,TabIndex=i,Font=new Font("Segoe UI Semibold",10),Margin=new Padding(2,0,2,0)};b.FlatAppearance.BorderSize=0;b.Click+=delegate{ShowPage(index);};navigation.Controls.Add(b,i,0);nav.Add(b);}
+        for(int i=0;i<names.Length;i++){navigation.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,20));int index=i;var b=new PillButton{Text=names[i],Dock=DockStyle.Fill,FlatStyle=FlatStyle.Flat,TabIndex=i,Font=new Font("Segoe UI Semibold",10),Margin=new Padding(2,0,2,0)};b.FlatAppearance.BorderSize=0;b.Click+=delegate{ShowPage(index);};navigation.Controls.Add(b,i,0);nav.Add(b);}
         Controls.Add(new BlueHeader{Dock=DockStyle.Top,Height=128});
         var footer=new Panel{Dock=DockStyle.Bottom,Height=36,Padding=new Padding(22,0,20,0)};
-        footer.Controls.Add(new Label{Text="v. 1.5.2   ·   Только на этом компьютере",Dock=DockStyle.Left,Width=400,TextAlign=ContentAlignment.MiddleLeft});
-        var theme=new Button{Text="Сменить тему",Dock=DockStyle.Right,Width=135,FlatStyle=FlatStyle.Flat};theme.FlatAppearance.BorderSize=0;theme.Click+=delegate{ChangeTheme();};footer.Controls.Add(theme);Controls.Add(footer);
+        footer.Controls.Add(new Label{Text="v. 1.5.3   ·   Локальная обработка",Dock=DockStyle.Left,Width=400,TextAlign=ContentAlignment.MiddleLeft});
+        var theme=new PillButton{Text="Сменить тему",Dock=DockStyle.Right,Width=135,FlatStyle=FlatStyle.Flat};theme.FlatAppearance.BorderSize=0;theme.Click+=delegate{ChangeTheme();};footer.Controls.Add(theme);Controls.Add(footer);
         trayMenu=new ContextMenuStrip{Font=new Font("Segoe UI",10),Padding=new Padding(5,7,5,7),ShowImageMargin=false,ShowCheckMargin=true};
         trayStatus=new ToolStripMenuItem("langswic · локальная обработка"){Enabled=false};trayMenu.Items.Add(trayStatus);
         trayMenu.Items.Add(new ToolStripSeparator());
@@ -135,7 +153,7 @@ public sealed class MainForm : Form {
         side=dark?Color.FromArgb(27,33,45):Color.FromArgb(246,248,252);
         ink=dark?Color.FromArgb(238,243,252):Color.FromArgb(26,31,53);
         muted=dark?Color.FromArgb(168,180,202):Color.FromArgb(111,119,143);
-        accent=Color.FromArgb(36,113,243);border=dark?Color.FromArgb(62,72,91):Color.FromArgb(228,233,243);
+        accent=Color.FromArgb(36,113,243);textAccent=dark?Color.FromArgb(126,180,255):accent;border=dark?Color.FromArgb(62,72,91):Color.FromArgb(228,233,243);
         activeNav=dark?Color.FromArgb(40,59,87):Color.FromArgb(230,239,255);
         BackColor=bg;ForeColor=ink;sidebar.BackColor=side;content.BackColor=bg;
         trayMenu.Renderer=new TrayMenuRenderer(dark);trayMenu.BackColor=card;trayMenu.ForeColor=ink;
@@ -144,7 +162,7 @@ public sealed class MainForm : Form {
     }
     void ShowPage(int index){
         page=index;content.SuspendLayout();if(title!=null&&title.Parent==null)title.Dispose();foreach(Control old in content.Controls.Cast<Control>().ToArray())old.Dispose();content.Controls.Clear();autoTile=shiftTile=smartTile=null;
-        foreach(var b in nav){b.BackColor=nav.IndexOf(b)==index?activeNav:side;b.ForeColor=nav.IndexOf(b)==index?accent:ink;}
+        foreach(var b in nav){b.BackColor=nav.IndexOf(b)==index?activeNav:side;b.ForeColor=nav.IndexOf(b)==index?textAccent:ink;}
         var host=new FlowLayoutPanel{FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,Width=Math.Max(500,content.ClientSize.Width-48),Location=new Point(24,16),Padding=new Padding(0),Margin=new Padding(0)};
         content.Controls.Add(host);
         string[] names={"Обзор","Настройки","Исключения","Словари","Горячие клавиши"};
@@ -162,8 +180,14 @@ public sealed class MainForm : Form {
         return body;
     }
     Button ActionButton(string text,Action action,int width=170){var b=new PillButton{Text=text,Width=width,Height=40,FlatStyle=FlatStyle.Flat,BackColor=accent,ForeColor=Color.White,Margin=new Padding(0,7,10,7),Font=new Font("Segoe UI Semibold",10)};b.FlatAppearance.BorderSize=0;b.FlatAppearance.MouseOverBackColor=Color.FromArgb(30,96,211);b.Click+=delegate{action();};return b;}
-    CheckBox Toggle(string text,bool value,Action<bool> changed){var c=new CheckBox{Text=text,Checked=value,AutoSize=false,Width=Math.Max(500,content.ClientSize.Width-100),Height=34,ForeColor=ink,BackColor=card,Margin=new Padding(0,2,0,2),FlatStyle=FlatStyle.Flat};c.CheckedChanged+=delegate{changed(c.Checked);store.Save();UpdateStatus();};return c;}
-    void SectionPicker(FlowLayoutPanel host,string[] options,int selected,Action<int> change){var picker=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=280,Height=32,Font=Font,AccessibleName="Раздел настроек",Margin=new Padding(0,0,0,10)};picker.Items.AddRange(options);picker.SelectedIndex=selected;picker.SelectedIndexChanged+=delegate{change(picker.SelectedIndex);ShowPage(page);};host.Controls.Add(picker);}
+    CheckBox Toggle(string text,bool value,Action<bool> changed){var c=new SwitchRow{Text=text,AccessibleName=text,Checked=value,AutoSize=false,Width=Math.Max(500,content.ClientSize.Width-100),Height=36,ForeColor=ink,BackColor=card,Accent=accent,Muted=muted,Margin=new Padding(0,2,0,2)};c.CheckedChanged+=delegate{changed(c.Checked);store.Save();UpdateStatus();};return c;}
+    void SectionPicker(FlowLayoutPanel host,string[] options,int selected,Action<int> change){
+        var picker=new FlowLayoutPanel{Width=host.Width,Height=42,WrapContents=false,Margin=new Padding(0,0,0,12),AccessibleName="Категория"};
+        for(int i=0;i<options.Length;i++){int index=i;var button=new SegmentButton{Text=options[i],AccessibleName=options[i],Width=options.Length==3?220:260,Height=40,Font=new Font("Segoe UI Semibold",10),ForeColor=ink,Surface=card,ActiveSurface=activeNav,Accent=textAccent,Outline=border,Checked=i==selected,Margin=new Padding(0,0,8,0)};
+            button.CheckedChanged+=delegate{if(!button.Checked)return;change(index);ShowPage(page);var next=content.Controls[0].Controls.OfType<FlowLayoutPanel>().FirstOrDefault(p=>p.AccessibleName=="Категория");if(next!=null)next.Controls[index].Focus();};picker.Controls.Add(button);
+        }host.Controls.Add(picker);
+    }
+    RoundedField Field(string text,int width,int height,bool multiline,string name){var field=new RoundedField{Text=text,Width=width,Height=height,Multiline=multiline,Font=Font};field.Apply(side,ink,border,accent,name);return field;}
     FlowLayoutPanel Row(){return new FlowLayoutPanel{FlowDirection=FlowDirection.LeftToRight,WrapContents=false,AutoSize=true,Width=Math.Max(380,content.ClientSize.Width-135),Margin=new Padding(0,3,0,3)};}
     void Overview(FlowLayoutPanel host){
         var tiles=new TableLayoutPanel{Width=host.Width,Height=223,ColumnCount=3,RowCount=1,Margin=new Padding(0,0,0,8)};
@@ -206,19 +230,24 @@ public sealed class MainForm : Form {
         var row=Row();row.Controls.Add(ActionButton("Экспорт JSON",delegate{using(var d=new System.Windows.Forms.SaveFileDialog{Filter="JSON (*.json)|*.json",FileName="langswic-settings.json"})if(d.ShowDialog()==DialogResult.OK)store.Export(d.FileName);},150));
         row.Controls.Add(ActionButton("Импорт JSON",delegate{using(var d=new System.Windows.Forms.OpenFileDialog{Filter="JSON (*.json)|*.json"})if(d.ShowDialog()==DialogResult.OK){try{store.Import(d.FileName);engine.AddUserWords(store.Current);RegisterHotkeys();ShowPage(page);}catch(Exception e){MessageBox.Show(e.Message,"Ошибка импорта",MessageBoxButtons.OK,MessageBoxIcon.Error);}}},150));c.Controls.Add(row);
     }
-    FlowLayoutPanel SoundPicker(string caption,string value,Action<string> set){var r=Row();var box=new TextBox{Text=value,Width=390};r.Controls.Add(box);r.Controls.Add(ActionButton("Выбрать WAV",delegate{using(var d=new System.Windows.Forms.OpenFileDialog{Filter="WAV (*.wav)|*.wav"})if(d.ShowDialog()==DialogResult.OK){box.Text=d.FileName;set(box.Text);store.Save();}},135));box.Leave+=delegate{set(box.Text);store.Save();};return r;}
+    FlowLayoutPanel SoundPicker(string caption,string value,Action<string> set){var r=Row();var box=Field(value,520,40,false,caption);r.Controls.Add(box);r.Controls.Add(ActionButton("Выбрать WAV",delegate{using(var d=new System.Windows.Forms.OpenFileDialog{Filter="WAV (*.wav)|*.wav"})if(d.ShowDialog()==DialogResult.OK){box.Text=d.FileName;set(box.Text);store.Save();}},135));box.Leave+=delegate{set(box.Text);store.Save();};return r;}
     void ExceptionsPage(FlowLayoutPanel host){
         SectionPicker(host,new[]{"Слова","Приложения"},exceptionSection,v=>exceptionSection=v);
         FlowLayoutPanel c;if(exceptionSection==0){
         c=Card(host,"Слова-исключения","Эти слова автоматика оставляет без изменений. По одному слову в строке.");
-        var words=new TextBox{Multiline=true,ScrollBars=ScrollBars.Vertical,Width=c.Width-8,Height=120,Text=string.Join(Environment.NewLine,store.Current.ExcludedWords.ToArray())};c.Controls.Add(words);
+        var words=Field(string.Join(Environment.NewLine,store.Current.ExcludedWords.ToArray()),c.Width-8,120,true,"Слова-исключения");words.ScrollBars=ScrollBars.Vertical;c.Controls.Add(words);
         c.Controls.Add(ActionButton("Сохранить слова",delegate{store.Current.ExcludedWords=Lines(words.Text);store.Save();},165));
         return;}
         c=Card(host,"Правила для приложений","Укажите имя процесса без .exe. Снимите все три флажка для полного отключения автоматики.");
         var binding=new BindingList<AppRule>(store.Current.Apps.Select(a=>new AppRule{Process=a.Process,Layout=a.Layout,Typos=a.Typos,Yo=a.Yo}).ToList());
-        var grid=new DataGridView{Width=c.Width-8,Height=190,DataSource=binding,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,RowHeadersVisible=false,AllowUserToAddRows=true,BackgroundColor=card,ForeColor=ink};
+        var grid=new DataGridView{Width=c.Width-8,Height=204,AutoGenerateColumns=false,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,RowHeadersVisible=false,AllowUserToAddRows=true,BackgroundColor=card,ForeColor=ink,ScrollBars=ScrollBars.None};
+        grid.Columns.Add(new DataGridViewTextBoxColumn{DataPropertyName="Process",HeaderText="Процесс",FillWeight=40});
+        string[] properties={"Layout","Typos","Yo"},headers={"Раскладка","Опечатки","Ё"};for(int i=0;i<3;i++)grid.Columns.Add(new DataGridViewCheckBoxColumn{DataPropertyName=properties[i],HeaderText=headers[i],CellTemplate=new SwitchCell(),FillWeight=20});
+        grid.DataSource=binding;
+        StyleGrid(grid);
         if(grid.Columns.Count>=4){grid.Columns[0].HeaderText="Процесс";grid.Columns[1].HeaderText="Раскладка";grid.Columns[2].HeaderText="Опечатки";grid.Columns[3].HeaderText="Ё";}
-        c.Controls.Add(grid);
+        var gridScroll=new ScrollRail(()=>grid.FirstDisplayedScrollingRowIndex,()=>grid.Rows.Count,()=>grid.DisplayedRowCount(false),line=>{if(grid.Rows.Count>0)grid.FirstDisplayedScrollingRowIndex=Math.Min(grid.Rows.Count-1,line);}){BackColor=card,ForeColor=muted};
+        grid.Scroll+=delegate{gridScroll.Invalidate();};grid.SelectionChanged+=delegate{gridScroll.Invalidate();};c.Controls.Add(ScrollContainer(grid,gridScroll,c.Width-8,204));
         c.Controls.Add(ActionButton("Сохранить правила",delegate{grid.EndEdit();store.Current.Apps=binding.Where(a=>!string.IsNullOrWhiteSpace(a.Process)).Select(a=>new AppRule{Process=a.Process.Trim().Replace(".exe","").ToLowerInvariant(),Layout=a.Layout,Typos=a.Typos,Yo=a.Yo}).ToList();store.Save();MessageBox.Show("Правила сохранены.","langswic");},165));
     }
     static List<string> Lines(string text){return text.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).Where(s=>s.Length>0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();}
@@ -230,14 +259,16 @@ public sealed class MainForm : Form {
         columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));columns.RowStyles.Add(new RowStyle(SizeType.Absolute,28));columns.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         columns.Controls.Add(new Label{Text="Русские слова",Dock=DockStyle.Fill,ForeColor=ink},0,0);
         columns.Controls.Add(new Label{Text="Английские слова",Dock=DockStyle.Fill,ForeColor=ink},1,0);
-        var ru=new TextBox{Multiline=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill,Text=string.Join(Environment.NewLine,store.Current.RuWords.ToArray())};columns.Controls.Add(ru,0,1);
-        var en=new TextBox{Multiline=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill,Text=string.Join(Environment.NewLine,store.Current.EnWords.ToArray())};columns.Controls.Add(en,1,1);c.Controls.Add(columns);
+        var ru=Field(string.Join(Environment.NewLine,store.Current.RuWords.ToArray()),400,140,true,"Русские слова");ru.Dock=DockStyle.Fill;ru.ScrollBars=ScrollBars.Vertical;columns.Controls.Add(ru,0,1);
+        var en=Field(string.Join(Environment.NewLine,store.Current.EnWords.ToArray()),400,140,true,"Английские слова");en.Dock=DockStyle.Fill;en.ScrollBars=ScrollBars.Vertical;columns.Controls.Add(en,1,1);c.Controls.Add(columns);
         c.Controls.Add(ActionButton("Сохранить словари",delegate{store.Current.RuWords=Lines(ru.Text);store.Current.EnWords=Lines(en.Text);engine.AddUserWords(store.Current);store.Save();},180));
         return;}
         c=Card(host,"Выученные правила","Правило «исходное → исходное» означает: не исправлять это слово. Выберите строку для удаления.");
-        var list=new ListBox{Width=c.Width-8,Height=150};
+        var list=new StyledList{Width=c.Width-8,Height=150,BorderStyle=BorderStyle.None,BackColor=side,ForeColor=ink,DrawMode=DrawMode.OwnerDrawFixed,ItemHeight=34,AccessibleName="Выученные правила",IntegralHeight=false};
+        list.DrawItem+=delegate(object sender,DrawItemEventArgs e){if(e.Index<0)return;bool selected=(e.State&DrawItemState.Selected)!=0;using(var brush=new SolidBrush(selected?activeNav:side))e.Graphics.FillRectangle(brush,e.Bounds);TextRenderer.DrawText(e.Graphics,list.Items[e.Index].ToString(),Font,new Rectangle(e.Bounds.X+12,e.Bounds.Y,e.Bounds.Width-24,e.Bounds.Height),selected?textAccent:ink,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);e.DrawFocusRectangle();};
         foreach(var p in store.Current.Learned.OrderBy(x=>x.Key))list.Items.Add(p.Key+" → "+p.Value);
-        c.Controls.Add(list);
+        var listScroll=new ScrollRail(()=>list.TopIndex,()=>list.Items.Count,()=>list.Height/list.ItemHeight,line=>{if(list.Items.Count>0)list.TopIndex=line;}){BackColor=side,ForeColor=muted};
+        list.SelectedIndexChanged+=delegate{listScroll.Invalidate();};list.KeyUp+=delegate{listScroll.Invalidate();};list.MouseWheel+=delegate{if(list.IsHandleCreated)list.BeginInvoke((Action)(()=>listScroll.Invalidate()));};c.Controls.Add(ScrollContainer(list,listScroll,c.Width-8,150));
         c.Controls.Add(ActionButton("Удалить правило",delegate{if(list.SelectedIndex<0)return;string key=list.SelectedItem.ToString().Split(new[]{" → "},StringSplitOptions.None)[0];store.Current.Learned.Remove(key);store.Save();list.Items.RemoveAt(list.SelectedIndex);},160));
     }
     void HotkeysPage(FlowLayoutPanel host){
@@ -248,15 +279,24 @@ public sealed class MainForm : Form {
         c.Controls.Add(Toggle("Одиночный Shift переключает раскладку",store.Current.SingleShift,v=>store.Current.SingleShift=v));
         c.Controls.Add(Toggle("Pause/Break",store.Current.Pause,v=>store.Current.Pause=v));
         return;}
-        var selected=new TextBox{Text=store.Current.SelectedHotkey,Width=190};
-        var manualWord=new TextBox{Text=store.Current.WordHotkey,Width=190};
-        var undo=new TextBox{Text=store.Current.UndoHotkey,Width=190};
-        var toggle=new TextBox{Text=store.Current.ToggleHotkey,Width=190};
+        var selected=Field(store.Current.SelectedHotkey,250,40,false,"Выделенный текст: сочетание клавиш");
+        var manualWord=Field(store.Current.WordHotkey,250,40,false,"Последнее слово: сочетание клавиш");
+        var undo=Field(store.Current.UndoHotkey,250,40,false,"Отмена: сочетание клавиш");
+        var toggle=Field(store.Current.ToggleHotkey,250,40,false,"Автоматика: сочетание клавиш");
         c.Controls.Add(HotkeyRow("Последнее слово",manualWord));c.Controls.Add(HotkeyRow("Выделенный текст",selected));c.Controls.Add(HotkeyRow("Отмена",undo));c.Controls.Add(HotkeyRow("Автоматика",toggle));
         var status=new Label{Width=c.Width,Height=36,ForeColor=muted,Text=HotkeyStatus()};
         c.Controls.Add(ActionButton("Применить сочетания",delegate{store.Current.WordHotkey=manualWord.Text;store.Current.SelectedHotkey=selected.Text;store.Current.UndoHotkey=undo.Text;store.Current.ToggleHotkey=toggle.Text;store.Save();RegisterHotkeys();status.Text=HotkeyStatus();},190));c.Controls.Add(status);
     }
-    FlowLayoutPanel HotkeyRow(string name,TextBox box){var r=Row();r.Controls.Add(new Label{Text=name,Width=190,Height=34,ForeColor=ink,TextAlign=ContentAlignment.MiddleLeft});r.Controls.Add(box);return r;}
+    FlowLayoutPanel HotkeyRow(string name,RoundedField box){var r=Row();box.Height=34;box.Margin=new Padding(0,0,8,0);r.Controls.Add(new Label{Text=name,Width=190,Height=34,Margin=new Padding(0),ForeColor=ink,TextAlign=ContentAlignment.MiddleLeft});r.Controls.Add(box);return r;}
+    void StyleGrid(DataGridView grid){
+        grid.BackColor=card;grid.BorderStyle=BorderStyle.None;grid.CellBorderStyle=DataGridViewCellBorderStyle.SingleHorizontal;grid.GridColor=border;grid.EnableHeadersVisualStyles=false;grid.ColumnHeadersBorderStyle=DataGridViewHeaderBorderStyle.None;grid.ColumnHeadersHeightSizeMode=DataGridViewColumnHeadersHeightSizeMode.DisableResizing;grid.ColumnHeadersHeight=38;grid.RowTemplate.Height=34;
+        grid.DefaultCellStyle=new DataGridViewCellStyle{BackColor=card,ForeColor=ink,SelectionBackColor=activeNav,SelectionForeColor=ink,Padding=new Padding(8,0,8,0)};
+        grid.ColumnHeadersDefaultCellStyle=new DataGridViewCellStyle{BackColor=side,ForeColor=muted,Font=new Font("Segoe UI Semibold",10),Padding=new Padding(8,0,8,0)};
+        grid.EditingControlShowing+=delegate(object sender,DataGridViewEditingControlShowingEventArgs e){e.Control.BackColor=side;e.Control.ForeColor=ink;var editor=e.Control as TextBox;if(editor!=null)editor.BorderStyle=BorderStyle.None;};
+        grid.CellPainting+=delegate(object sender,DataGridViewCellPaintingEventArgs e){if(e.RowIndex<0||e.ColumnIndex<0||!(grid.Columns[e.ColumnIndex] is DataGridViewCheckBoxColumn))return;using(var brush=new SolidBrush((e.State&DataGridViewElementStates.Selected)!=0?activeNav:card))e.Graphics.FillRectangle(brush,e.CellBounds);using(var pen=new Pen(border))e.Graphics.DrawLine(pen,e.CellBounds.Left,e.CellBounds.Bottom-1,e.CellBounds.Right,e.CellBounds.Bottom-1);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;bool value=e.Value is bool&&(bool)e.Value;ControlShape.Switch(e.Graphics,new Rectangle(e.CellBounds.X+(e.CellBounds.Width-34)/2,e.CellBounds.Y+(e.CellBounds.Height-20)/2,34,20),value,accent,muted);if(grid.CurrentCell!=null&&grid.CurrentCell.RowIndex==e.RowIndex&&grid.CurrentCell.ColumnIndex==e.ColumnIndex&&grid.Focused)e.Paint(e.ClipBounds,DataGridViewPaintParts.Focus);e.Handled=true;};
+        grid.CurrentCellDirtyStateChanged+=delegate{if(grid.IsCurrentCellDirty&&grid.CurrentCell is DataGridViewCheckBoxCell)grid.CommitEdit(DataGridViewDataErrorContexts.Commit);};
+    }
+    Panel ScrollContainer(Control editor,ScrollRail rail,int width,int height){var panel=new Panel{Width=width,Height=height,BackColor=editor.BackColor,Padding=new Padding(2),Margin=new Padding(0,3,0,3)};editor.Dock=DockStyle.Fill;rail.Dock=DockStyle.Right;rail.Width=18;panel.Controls.Add(editor);panel.Controls.Add(rail);return panel;}
     string HotkeyStatus(){return hotkeyErrors.Count==0?"Сочетания зарегистрированы.":string.Join("; ",hotkeyErrors.Values.ToArray());}
     void UpdateStatus(){
         if(IsDisposed || input==null)return;

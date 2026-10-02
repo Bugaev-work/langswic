@@ -46,7 +46,7 @@ static class Program {
             if(!string.Equals(Application.ExecutablePath,target,StringComparison.OrdinalIgnoreCase))File.Copy(Application.ExecutablePath,target,true);
             Shortcut(StartMenu(),target);
             using(var key=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\langswic")){
-                key.SetValue("DisplayName","langswic");key.SetValue("DisplayVersion","1.5.2");key.SetValue("Publisher","Личный проект");
+                key.SetValue("DisplayName","langswic");key.SetValue("DisplayVersion","1.5.3");key.SetValue("Publisher","langswic");
                 key.SetValue("InstallLocation",dir);key.SetValue("DisplayIcon",target);
                 key.SetValue("UninstallString","\""+target+"\" --uninstall");key.SetValue("NoModify",1,RegistryValueKind.DWord);
             }
@@ -208,7 +208,7 @@ static class SmokeTest {
         form.Shown+=delegate{var t=new System.Windows.Forms.Timer{Interval=500};t.Tick+=delegate{t.Stop();t.Dispose();form.Show();form.Activate();Application.DoEvents();ready=form.HookReady&&form.LayoutValid&&form.SmokePages();
             if(ready){form.Show();form.Activate();Application.DoEvents();
 #if INPUT_TEST
-                ready=form.SmokeFeatures()&&form.SmokeTray();
+                ready=form.SmokeFeatures()&&form.SmokeControls()&&form.SmokeTray();
 #endif
                 Capture(form,"ui-preview.png");
 #if INPUT_TEST
